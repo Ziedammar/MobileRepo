@@ -1,0 +1,118 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum OrderStatus {
+  PENDING
+  ACCEPTED
+  PREPARING
+  PICKED_UP
+  ON_THE_WAY
+  DELIVERED
+  CANCELLED
+}
+
+model User {
+  id        String  @id @default(cuid())
+  name      String
+  phone     String?
+  createdAt DateTime @default(now())
+  orders    Order[]
+}
+
+model Courier {
+  id          String  @id @default(cuid())
+  name        String
+  rating      Float   @default(4.8)
+  vehicle     String
+  lat         Float
+  lng         Float
+  isAvailable Boolean @default(true)
+  createdAt   DateTime @default(now())
+  orders      Order[]
+}
+
+model Store {
+  id          String   @id @default(cuid())
+  name        String
+  category    String
+  description String
+  rating      Float    @default(4.5)
+  etaMinutes  Int
+  deliveryFee Float
+  imageUrl    String
+  lat         Float
+  lng         Float
+  createdAt   DateTime @default(now())
+  products    Product[]
+  orders      Order[]
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  storeId     String
+  name        String
+  description String
+  price       Float
+  imageUrl    String
+  isPopular   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  store       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  orderItems  OrderItem[]
+
+  @@index([storeId])
+}
+
+model Order {
+  id          String     @id @default(cuid())
+  userId      String
+  storeId     String
+  courierId   String?
+  status      OrderStatus @default(PENDING)
+  subtotal    Float
+  deliveryFee Float
+  total       Float
+  addressText String
+  addressLat  Float
+  addressLng  Float
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  user        User        @relation(fields: [userId], references: [id])
+  store       Store       @relation(fields: [storeId], references: [id])
+  courier     Courier?    @relation(fields: [courierId], references: [id])
+  items       OrderItem[]
+  events      OrderStatusEvent[]
+
+  @@index([userId])
+  @@index([storeId])
+  @@index([courierId])
+}
+
+model OrderItem {
+  id            String  @id @default(cuid())
+  orderId       String
+  productId     String
+  nameSnapshot  String
+  priceSnapshot Float
+  quantity      Int
+  order         Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product       Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+}
+
+model OrderStatusEvent {
+  id        String      @id @default(cuid())
+  orderId   String
+  status    OrderStatus
+  label     String
+  createdAt DateTime    @default(now())
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
