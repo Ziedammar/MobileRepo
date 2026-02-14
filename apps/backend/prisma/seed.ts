@@ -1,6 +1,9 @@
+import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "@prisma/client";
 
-const prisma = new PrismaClient();
+const databaseUrl = process.env.DATABASE_URL ?? "file:./prisma/dev.db";
+const adapter = new PrismaBetterSqlite3({ url: databaseUrl });
+const prisma = new PrismaClient({ adapter });
 
 const storesSeed = [
   {
