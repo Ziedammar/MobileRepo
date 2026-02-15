@@ -13,7 +13,6 @@ import bcrypt from "bcryptjs";
 import Fastify, {
   type FastifyReply,
   type FastifyRequest,
-  type RouteGenericInterface,
 } from "fastify";
 import { z } from "zod";
 
@@ -35,6 +34,7 @@ const databaseUrl = process.env.DATABASE_URL ?? "file:./prisma/dev.db";
 const adapter = new PrismaBetterSqlite3({ url: databaseUrl });
 const prisma = new PrismaClient({ adapter });
 const app = Fastify({ logger: true });
+const appAuth = app as any;
 
 const PORT = Number(process.env.PORT ?? 3333);
 const HOST = process.env.HOST ?? "0.0.0.0";
@@ -229,7 +229,7 @@ function signUserToken(user: {
   email: string | null;
   name: string;
 }): string {
-  return app.jwt.sign(
+  return appAuth.jwt.sign(
     {
       sub: user.id,
       role: user.role,
@@ -328,7 +328,7 @@ async function getAuthFromRequest(
   }
 
   try {
-    const payload = await app.jwt.verify<AuthTokenPayload>(token);
+    const payload = await appAuth.jwt.verify<AuthTokenPayload>(token);
     return payload;
   } catch {
     throw new Error("AUTH_INVALID");
@@ -538,7 +538,7 @@ async function getOrderAccessMeta(orderId: string) {
 
 const authenticate = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
-    await request.jwtVerify();
+    await (request as FastifyRequest & { jwtVerify: () => Promise<void> }).jwtVerify();
   } catch {
     return reply.status(401).send({ message: "Unauthorized" });
   }
@@ -551,7 +551,8 @@ const authorizeRoles =
       return;
     }
 
-    if (!roles.includes(request.user.role)) {
+    const authUser = (request as FastifyRequest & { user: AuthTokenPayload }).user;
+    if (!roles.includes(authUser.role)) {
       return reply.status(403).send({ message: "Forbidden" });
     }
   };
@@ -668,8 +669,9 @@ app.post("/auth/login", async (request, reply) => {
 });
 
 app.get("/auth/me", { preHandler: authenticate }, async (request, reply) => {
+  const authUser = (request as FastifyRequest & { user: AuthTokenPayload }).user;
   const user = await prisma.user.findUnique({
-    where: { id: request.user.sub },
+    where: { id: authUser.sub },
     include: {
       courierProfile: true,
     },
@@ -1301,8 +1303,9 @@ app.get(
   "/courier/orders/me",
   { preHandler: authorizeRoles([UserRole.COURIER]) },
   async (request, reply) => {
+    const authUser = (request as FastifyRequest & { user: AuthTokenPayload }).user;
     const courier = await prisma.courier.findUnique({
-      where: { userId: request.user.sub },
+      where: { userId: authUser.sub },
     });
 
     if (!courier) {
@@ -1348,9 +1351,10 @@ app.patch(
   async (request, reply) => {
     const params = z.object({ orderId: z.string().cuid() }).parse(request.params);
     const body = courierStatusSchema.parse(request.body);
+    const authUser = (request as FastifyRequest & { user: AuthTokenPayload }).user;
 
     const courier = await prisma.courier.findUnique({
-      where: { userId: request.user.sub },
+      where: { userId: authUser.sub },
     });
 
     if (!courier) {
@@ -1421,18 +1425,13 @@ app.patch(
   },
 );
 
-type WsRoute = RouteGenericInterface & {
-  Params: { orderId: string };
-  Querystring: { token?: string };
-};
-
-app.get<WsRoute>(
+appAuth.get(
   "/ws/orders/:orderId",
   { websocket: true },
-  async (socket, request) => {
+  async (socket: WsLike, request: FastifyRequest) => {
     const paramsResult = z
       .object({ orderId: z.string().cuid() })
-      .safeParse(request.params);
+      .safeParse((request as FastifyRequest & { params: unknown }).params);
     if (!paramsResult.success) {
       safeSocketSend(socket, { type: "error", message: "Invalid order id" });
       socket.close();
@@ -1441,7 +1440,7 @@ app.get<WsRoute>(
 
     const queryResult = z
       .object({ token: z.string().min(20) })
-      .safeParse(request.query);
+      .safeParse((request as FastifyRequest & { query: unknown }).query);
     if (!queryResult.success) {
       safeSocketSend(socket, { type: "error", message: "Missing token" });
       socket.close();
@@ -1450,7 +1449,7 @@ app.get<WsRoute>(
 
     let authUser: AuthTokenPayload;
     try {
-      authUser = await app.jwt.verify<AuthTokenPayload>(queryResult.data.token);
+      authUser = await appAuth.jwt.verify<AuthTokenPayload>(queryResult.data.token);
     } catch {
       safeSocketSend(socket, { type: "error", message: "Invalid token" });
       socket.close();

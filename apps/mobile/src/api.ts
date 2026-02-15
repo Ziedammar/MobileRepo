@@ -16,7 +16,7 @@ const fallbackBaseUrl =
   Platform.OS === "android" ? "http://10.0.2.2:3333" : "http://localhost:3333";
 
 export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? fallbackBaseUrl;
-export const WS_BASE_URL = API_BASE_URL.replace(/^http/i, (protocol) =>
+export const WS_BASE_URL = API_BASE_URL.replace(/^http/i, (protocol: string) =>
   protocol.toLowerCase() === "https" ? "wss" : "ws",
 );
 
@@ -30,18 +30,15 @@ export const getOrderWsUrl = (orderId: string, token: string): string =>
   `${WS_BASE_URL}/ws/orders/${orderId}?token=${encodeURIComponent(token)}`;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const withAuthHeader =
-    authToken && !("Authorization" in (init?.headers ?? {}))
-      ? { Authorization: `Bearer ${authToken}` }
-      : {};
+  const headers = new Headers(init?.headers ?? {});
+  headers.set("Content-Type", "application/json");
+  if (authToken && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${authToken}`);
+  }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...withAuthHeader,
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
 
   const rawBody = await response.text();
