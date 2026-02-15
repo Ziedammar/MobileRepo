@@ -328,7 +328,7 @@ async function getAuthFromRequest(
   }
 
   try {
-    const payload = await appAuth.jwt.verify<AuthTokenPayload>(token);
+    const payload = (await appAuth.jwt.verify(token)) as AuthTokenPayload;
     return payload;
   } catch {
     throw new Error("AUTH_INVALID");
@@ -1449,7 +1449,9 @@ appAuth.get(
 
     let authUser: AuthTokenPayload;
     try {
-      authUser = await appAuth.jwt.verify<AuthTokenPayload>(queryResult.data.token);
+      authUser = (await appAuth.jwt.verify(
+        queryResult.data.token,
+      )) as AuthTokenPayload;
     } catch {
       safeSocketSend(socket, { type: "error", message: "Invalid token" });
       socket.close();
