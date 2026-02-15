@@ -321,7 +321,9 @@ function publishRealtime(orderId: string, storeId: string, reason: string): void
   publishDashboardRefresh(storeId, reason);
 }
 
-function statusFromAcceptedElapsedMinutes(elapsedMinutes: number): OrderStatus {
+function statusFromAcceptedElapsedMinutes(
+  elapsedMinutes: number,
+): (typeof orderProgressFlow)[number] {
   if (elapsedMinutes < 3) {
     return OrderStatus.ACCEPTED;
   }
@@ -719,7 +721,8 @@ async function syncOrderStatus(orderId: string): Promise<OrderStatus | null> {
     return order.status;
   }
 
-  const currentIndex = orderProgressFlow.indexOf(order.status);
+  const currentStatus = order.status as (typeof orderProgressFlow)[number];
+  const currentIndex = orderProgressFlow.indexOf(currentStatus);
   if (currentIndex < 0) {
     return order.status;
   }
@@ -2228,7 +2231,7 @@ app.patch("/super-admin/users/:userId/approval", async (request, reply) => {
     return reply.status(404).send({ message: "User not found" });
   }
 
-  if (![UserRole.ADMIN, UserRole.LIVREUR].includes(user.role)) {
+  if (user.role !== UserRole.ADMIN && user.role !== UserRole.LIVREUR) {
     return reply.status(400).send({ message: "User role is not approvable" });
   }
 
