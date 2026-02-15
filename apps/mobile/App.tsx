@@ -14,8 +14,9 @@ import {
   View,
 } from "react-native";
 
-import { API_BASE_URL, api } from "./src/api";
+import { API_BASE_URL, api, getOrderWsUrl, setAuthToken } from "./src/api";
 import type {
+  AuthUser,
   HomeResponse,
   OrderDetails,
   Product,
@@ -57,12 +58,18 @@ export default function App() {
   const [loadingHome, setLoadingHome] = useState(true);
   const [loadingStore, setLoadingStore] = useState(false);
   const [processingCheckout, setProcessingCheckout] = useState(false);
-  const [guestUserId, setGuestUserId] = useState<string | null>(null);
   const [addressText, setAddressText] = useState("Les Berges du Lac, Tunis");
   const [orderId, setOrderId] = useState<string | null>(null);
   const [orderDetails, setOrderDetails] = useState<OrderDetails | null>(null);
   const [tracking, setTracking] = useState<TrackingResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [authName, setAuthName] = useState("Client Mobile");
+  const [authEmail, setAuthEmail] = useState("client@livraisonpro.app");
+  const [authPassword, setAuthPassword] = useState("Client123!");
+  const [authLoading, setAuthLoading] = useState(false);
 
   useEffect(() => {
     const fetchHome = async () => {
@@ -81,6 +88,10 @@ export default function App() {
     void fetchHome();
   }, []);
 
+  useEffect(() => {
+    setAuthToken(sessionToken);
+  }, [sessionToken]);
+
   const refreshOrderState = async (targetOrderId: string): Promise<void> => {
     const [details, trackingData] = await Promise.all([
       api.getOrder(targetOrderId),
@@ -92,7 +103,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!orderId) {
+    if (!orderId || !sessionToken) {
       return;
     }
 
@@ -118,22 +129,86 @@ export default function App() {
     };
 
     void pollOrder();
-    const interval = setInterval(() => void pollOrder(), 6000);
+    const interval = setInterval(() => void pollOrder(), 12000);
 
     return () => {
       isCancelled = true;
       clearInterval(interval);
     };
-  }, [orderId]);
+  }, [orderId, sessionToken]);
 
-  const ensureGuestUser = async (): Promise<string> => {
-    if (guestUserId) {
-      return guestUserId;
+  useEffect(() => {
+    if (!orderId || !sessionToken) {
+      return;
     }
 
-    const auth = await api.authGuest({ name: "Client Mobile" });
-    setGuestUserId(auth.user.id);
-    return auth.user.id;
+    const ws = new WebSocket(getOrderWsUrl(orderId, sessionToken));
+
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          type?: string;
+          orderId?: string;
+        };
+
+        if (payload.type === "order:refresh" && payload.orderId === orderId) {
+          void refreshOrderState(orderId);
+        }
+      } catch {
+        // Ignore malformed websocket frames
+      }
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [orderId, sessionToken]);
+
+  const applySession = (session: {
+    token: string;
+    user: AuthUser;
+  }): void => {
+    setSessionToken(session.token);
+    setCurrentUser(session.user);
+  };
+
+  const ensureSession = async (): Promise<void> => {
+    if (sessionToken) {
+      return;
+    }
+
+    const auth = await api.authGuest({ name: authName || "Client Mobile" });
+    applySession(auth);
+  };
+
+  const submitAuth = async () => {
+    setAuthLoading(true);
+    try {
+      const session =
+        authMode === "login"
+          ? await api.login({
+              email: authEmail.trim().toLowerCase(),
+              password: authPassword,
+            })
+          : await api.register({
+              name: authName.trim(),
+              email: authEmail.trim().toLowerCase(),
+              password: authPassword,
+            });
+
+      applySession(session);
+      setErrorMessage(null);
+    } catch (error) {
+      setErrorMessage(errorText(error));
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const logout = () => {
+    setSessionToken(null);
+    setCurrentUser(null);
+    setAuthToken(null);
   };
 
   const categories = useMemo(() => {
@@ -236,9 +311,8 @@ export default function App() {
 
     setProcessingCheckout(true);
     try {
-      const userId = await ensureGuestUser();
+      await ensureSession();
       const order = await api.createOrder({
-        userId,
         storeId: cartStoreId,
         addressText,
         addressLat: 36.842,
@@ -249,6 +323,7 @@ export default function App() {
         })),
       });
 
+      await api.payOrder(order.id, { provider: "CARD", cardLast4: "4242" });
       setOrderId(order.id);
       await refreshOrderState(order.id);
       setActiveTab("tracking");
@@ -581,6 +656,7 @@ export default function App() {
           <LinearGradient colors={["#163A73", "#1E3A8A"]} style={styles.trackingHero}>
             <Text style={styles.trackingStatus}>{orderDetails.statusLabel}</Text>
             <Text style={styles.trackingEta}>ETA {tracking.etaMinutes} min</Text>
+            <Text style={styles.trackingEta}>Paiement: {orderDetails.paymentStatus}</Text>
             <Text style={styles.trackingOrder}>Commande #{orderDetails.id.slice(0, 8)}</Text>
           </LinearGradient>
 
@@ -636,26 +712,116 @@ export default function App() {
   const renderProfile = () => (
     <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
       <Text style={styles.sectionTitle}>Profil</Text>
-      <View style={styles.profileCard}>
-        <View style={styles.avatarCircle}>
-          <MaterialCommunityIcons name="account" size={24} color="#0B1020" />
-        </View>
-        <View>
-          <Text style={styles.profileName}>Client Mobile</Text>
-          <Text style={styles.profileHint}>Compte invite connecte</Text>
-        </View>
-      </View>
 
-      <View style={styles.statsGrid}>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{home?.stores.length ?? 0}</Text>
-          <Text style={styles.statLabel}>Stores actifs</Text>
+      {currentUser ? (
+        <>
+          <View style={styles.profileCard}>
+            <View style={styles.avatarCircle}>
+              <MaterialCommunityIcons name="account" size={24} color="#0B1020" />
+            </View>
+            <View>
+              <Text style={styles.profileName}>{currentUser.name}</Text>
+              <Text style={styles.profileHint}>
+                {currentUser.role} · {currentUser.email ?? "Compte invite"}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.statsGrid}>
+            <View style={styles.statCard}>
+              <Text style={styles.statValue}>{home?.stores.length ?? 0}</Text>
+              <Text style={styles.statLabel}>Stores actifs</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statValue}>{orderId ? 1 : 0}</Text>
+              <Text style={styles.statLabel}>Commande recente</Text>
+            </View>
+          </View>
+
+          <Pressable style={styles.secondaryButton} onPress={logout}>
+            <Text style={styles.secondaryButtonText}>Se deconnecter</Text>
+          </Pressable>
+        </>
+      ) : (
+        <View style={styles.infoCard}>
+          <Text style={styles.infoCardTitle}>Connexion V2 Pro</Text>
+          <View style={styles.authModeRow}>
+            <Pressable
+              style={[
+                styles.authModeChip,
+                authMode === "login" ? styles.authModeChipActive : null,
+              ]}
+              onPress={() => setAuthMode("login")}
+            >
+              <Text
+                style={[
+                  styles.authModeText,
+                  authMode === "login" ? styles.authModeTextActive : null,
+                ]}
+              >
+                Login
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.authModeChip,
+                authMode === "register" ? styles.authModeChipActive : null,
+              ]}
+              onPress={() => setAuthMode("register")}
+            >
+              <Text
+                style={[
+                  styles.authModeText,
+                  authMode === "register" ? styles.authModeTextActive : null,
+                ]}
+              >
+                Register
+              </Text>
+            </Pressable>
+          </View>
+
+          {authMode === "register" ? (
+            <TextInput
+              value={authName}
+              onChangeText={setAuthName}
+              placeholder="Nom complet"
+              placeholderTextColor="#7A89AF"
+              style={styles.authInput}
+            />
+          ) : null}
+          <TextInput
+            value={authEmail}
+            onChangeText={setAuthEmail}
+            placeholder="Email"
+            placeholderTextColor="#7A89AF"
+            keyboardType="email-address"
+            autoCapitalize="none"
+            style={styles.authInput}
+          />
+          <TextInput
+            value={authPassword}
+            onChangeText={setAuthPassword}
+            placeholder="Mot de passe"
+            placeholderTextColor="#7A89AF"
+            secureTextEntry
+            style={styles.authInput}
+          />
+
+          <Pressable
+            style={[styles.checkoutButton, authLoading ? styles.checkoutButtonDisabled : null]}
+            onPress={() => void submitAuth()}
+            disabled={authLoading}
+          >
+            {authLoading ? (
+              <ActivityIndicator size="small" color="#0B1020" />
+            ) : (
+              <Text style={styles.checkoutButtonText}>
+                {authMode === "login" ? "Se connecter" : "Creer un compte"}
+              </Text>
+            )}
+          </Pressable>
         </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statValue}>{orderId ? 1 : 0}</Text>
-          <Text style={styles.statLabel}>Commande recente</Text>
-        </View>
-      </View>
+      )}
 
       <View style={styles.infoCard}>
         <Text style={styles.infoCardTitle}>Configuration API</Text>
@@ -1280,6 +1446,53 @@ const styles = StyleSheet.create({
   },
   infoCardText: {
     color: "#9FB1D8",
+  },
+  secondaryButton: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#334876",
+    alignItems: "center",
+    paddingVertical: 12,
+    marginBottom: 12,
+  },
+  secondaryButtonText: {
+    color: "#C7D8FF",
+    fontWeight: "700",
+  },
+  authModeRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 10,
+  },
+  authModeChip: {
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#2C3E69",
+    paddingVertical: 8,
+    alignItems: "center",
+    backgroundColor: "#101B34",
+  },
+  authModeChipActive: {
+    borderColor: "#22D3EE",
+    backgroundColor: "#0D2738",
+  },
+  authModeText: {
+    color: "#9FB1D8",
+    fontWeight: "600",
+  },
+  authModeTextActive: {
+    color: "#22D3EE",
+  },
+  authInput: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#2A3B65",
+    backgroundColor: "#101B34",
+    color: "#F1F5FF",
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    marginBottom: 10,
   },
   errorBanner: {
     marginHorizontal: 16,

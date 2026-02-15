@@ -7,6 +7,21 @@ export type Product = {
   isPopular?: boolean;
 };
 
+export type UserRole = "CUSTOMER" | "COURIER" | "ADMIN";
+
+export type AuthUser = {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  role: UserRole;
+};
+
+export type AuthResponse = {
+  token: string;
+  user: AuthUser;
+};
+
 export type StoreSummary = {
   id: string;
   name: string;
@@ -51,14 +66,7 @@ export type StoreDetails = {
   products: Product[];
 };
 
-export type GuestAuthResponse = {
-  token: string;
-  user: {
-    id: string;
-    name: string;
-    phone?: string | null;
-  };
-};
+export type GuestAuthResponse = AuthResponse;
 
 export type CreateOrderPayload = {
   userId?: string;
@@ -78,6 +86,8 @@ export type CreateOrderResponse = {
   id: string;
   status: string;
   statusLabel: string;
+  paymentStatus: string;
+  paymentRequired: boolean;
   etaMinutes: number;
   store: {
     id: string;
@@ -96,10 +106,22 @@ export type CreateOrderResponse = {
   };
 };
 
+export type PaymentResponse = {
+  orderId: string;
+  paymentStatus: string;
+  paymentIntentId: string | null;
+  provider: "CARD" | "APPLE_PAY" | "GOOGLE_PAY";
+  cardLast4: string | null;
+  status: string;
+};
+
 export type OrderDetails = {
   id: string;
   status: string;
   statusLabel: string;
+  paymentStatus: string;
+  paymentIntentId: string | null;
+  paidAt: string | null;
   createdAt: string;
   etaMinutes: number;
   store: {
@@ -144,6 +166,7 @@ export type TrackingResponse = {
   orderId: string;
   status: string;
   statusLabel: string;
+  paymentStatus: string;
   etaMinutes: number;
   courier: {
     id: string;

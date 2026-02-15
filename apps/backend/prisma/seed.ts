@@ -1,9 +1,14 @@
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, UserRole } from "@prisma/client";
+import bcrypt from "bcryptjs";
 
 const databaseUrl = process.env.DATABASE_URL ?? "file:./prisma/dev.db";
 const adapter = new PrismaBetterSqlite3({ url: databaseUrl });
 const prisma = new PrismaClient({ adapter });
+
+const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "Admin123!";
+const customerPassword = process.env.SEED_CUSTOMER_PASSWORD ?? "Client123!";
+const courierPassword = process.env.SEED_COURIER_PASSWORD ?? "Courier123!";
 
 const storesSeed = [
   {
@@ -131,33 +136,91 @@ async function main() {
   await prisma.courier.deleteMany();
   await prisma.user.deleteMany();
 
-  await prisma.courier.createMany({
-    data: [
-      {
-        name: "Amir",
-        rating: 4.9,
-        vehicle: "Scooter",
-        lat: 36.809,
-        lng: 10.179,
+  const [adminHash, customerHash, courierHash] = await Promise.all([
+    bcrypt.hash(adminPassword, 12),
+    bcrypt.hash(customerPassword, 12),
+    bcrypt.hash(courierPassword, 12),
+  ]);
+
+  await prisma.user.create({
+    data: {
+      name: "Admin Pro",
+      email: "admin@livraisonpro.app",
+      passwordHash: adminHash,
+      role: UserRole.ADMIN,
+      phone: "+216 99 999 999",
+    },
+  });
+
+  await prisma.user.create({
+    data: {
+      name: "Client Demo",
+      email: "client@livraisonpro.app",
+      passwordHash: customerHash,
+      role: UserRole.CUSTOMER,
+      phone: "+216 99 000 000",
+    },
+  });
+
+  const courierProfiles = [
+    {
+      name: "Amir",
+      email: "amir.courier@livraisonpro.app",
+      rating: 4.9,
+      vehicle: "Scooter",
+      lat: 36.809,
+      lng: 10.179,
+    },
+    {
+      name: "Nour",
+      email: "nour.courier@livraisonpro.app",
+      rating: 4.8,
+      vehicle: "Velo",
+      lat: 36.802,
+      lng: 10.168,
+    },
+    {
+      name: "Youssef",
+      email: "youssef.courier@livraisonpro.app",
+      rating: 4.7,
+      vehicle: "Moto",
+      lat: 36.813,
+      lng: 10.173,
+    },
+  ];
+
+  for (const courier of courierProfiles) {
+    const user = await prisma.user.create({
+      data: {
+        name: courier.name,
+        email: courier.email,
+        passwordHash: courierHash,
+        role: UserRole.COURIER,
+      },
+    });
+
+    await prisma.courier.create({
+      data: {
+        userId: user.id,
+        name: courier.name,
+        rating: courier.rating,
+        vehicle: courier.vehicle,
+        lat: courier.lat,
+        lng: courier.lng,
         isAvailable: true,
       },
-      {
-        name: "Nour",
-        rating: 4.8,
-        vehicle: "Velo",
-        lat: 36.802,
-        lng: 10.168,
-        isAvailable: true,
-      },
-      {
-        name: "Youssef",
-        rating: 4.7,
-        vehicle: "Moto",
-        lat: 36.813,
-        lng: 10.173,
-        isAvailable: true,
-      },
-    ],
+    });
+  }
+
+  await prisma.courier.create({
+    data: {
+      name: "Livreur Offline",
+      rating: 4.6,
+      vehicle: "Scooter",
+      lat: 36.801,
+      lng: 10.165,
+      isAvailable: false,
+    },
   });
 
   for (const storeSeed of storesSeed) {
@@ -187,12 +250,10 @@ async function main() {
     });
   }
 
-  await prisma.user.create({
-    data: {
-      name: "Client Demo",
-      phone: "+216 99 000 000",
-    },
-  });
+  console.log("Comptes seed:");
+  console.log("Admin: admin@livraisonpro.app /", adminPassword);
+  console.log("Client: client@livraisonpro.app /", customerPassword);
+  console.log("Courier: <prenom>.courier@livraisonpro.app /", courierPassword);
 }
 
 main()

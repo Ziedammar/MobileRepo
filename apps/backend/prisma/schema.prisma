@@ -16,24 +16,47 @@ enum OrderStatus {
   CANCELLED
 }
 
+enum UserRole {
+  CUSTOMER
+  COURIER
+  ADMIN
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
 model User {
-  id        String  @id @default(cuid())
-  name      String
-  phone     String?
-  createdAt DateTime @default(now())
-  orders    Order[]
+  id            String    @id @default(cuid())
+  name          String
+  email         String?   @unique
+  passwordHash  String?
+  role          UserRole  @default(CUSTOMER)
+  phone         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  orders        Order[]
+  courierProfile Courier?
 }
 
 model Courier {
-  id          String  @id @default(cuid())
+  id          String   @id @default(cuid())
+  userId      String?  @unique
   name        String
-  rating      Float   @default(4.8)
+  rating      Float    @default(4.8)
   vehicle     String
   lat         Float
   lng         Float
-  isAvailable Boolean @default(true)
+  isAvailable Boolean  @default(true)
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User?    @relation(fields: [userId], references: [id])
   orders      Order[]
+
+  @@index([userId])
 }
 
 model Store {
@@ -68,28 +91,33 @@ model Product {
 }
 
 model Order {
-  id          String     @id @default(cuid())
-  userId      String
-  storeId     String
-  courierId   String?
-  status      OrderStatus @default(PENDING)
-  subtotal    Float
-  deliveryFee Float
-  total       Float
-  addressText String
-  addressLat  Float
-  addressLng  Float
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  user        User        @relation(fields: [userId], references: [id])
-  store       Store       @relation(fields: [storeId], references: [id])
-  courier     Courier?    @relation(fields: [courierId], references: [id])
-  items       OrderItem[]
-  events      OrderStatusEvent[]
+  id              String        @id @default(cuid())
+  userId          String
+  storeId         String
+  courierId       String?
+  status          OrderStatus   @default(PENDING)
+  paymentStatus   PaymentStatus @default(PENDING)
+  paymentIntentId String?
+  paidAt          DateTime?
+  subtotal        Float
+  deliveryFee     Float
+  total           Float
+  addressText     String
+  addressLat      Float
+  addressLng      Float
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  user            User          @relation(fields: [userId], references: [id])
+  store           Store         @relation(fields: [storeId], references: [id])
+  courier         Courier?      @relation(fields: [courierId], references: [id])
+  items           OrderItem[]
+  events          OrderStatusEvent[]
 
   @@index([userId])
   @@index([storeId])
   @@index([courierId])
+  @@index([status])
+  @@index([paymentStatus])
 }
 
 model OrderItem {
