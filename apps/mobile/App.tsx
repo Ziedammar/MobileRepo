@@ -21,6 +21,7 @@ import {
   getOrderWsUrl,
   setAuthToken,
 } from "./src/api";
+import { ThemeHeaderCard, ThemeMetricCard } from "./src/themeTemplate";
 import type {
   AdminDashboardResponse,
   AdminOrder,
@@ -818,10 +819,13 @@ export default function App() {
 
     return (
       <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
-        <LinearGradient colors={["#D1FAE5", "#ECFDF5"]} style={styles.heroCard}>
-          <Text style={styles.heroTitle}>{home.hero.title}</Text>
-          <Text style={styles.heroSubtitle}>{home.hero.subtitle}</Text>
-        </LinearGradient>
+        <ThemeHeaderCard
+          icon="compass-outline"
+          title={home.hero.title}
+          subtitle={home.hero.subtitle}
+          actionLabel="Actualiser"
+          onActionPress={() => void refreshHome(true)}
+        />
 
         <View style={styles.searchBox}>
           <MaterialCommunityIcons name="magnify" size={18} color="#64748B" />
@@ -1046,35 +1050,38 @@ export default function App() {
         </View>
       ) : (
         <>
-          <LinearGradient colors={["#D1FAE5", "#ECFDF5"]} style={styles.heroCard}>
-            <Text style={styles.heroTitle}>{adminDashboard.store.name}</Text>
-            <Text style={styles.heroSubtitle}>
-              {adminDashboard.store.category} · Temps reel
-            </Text>
-          </LinearGradient>
+          <ThemeHeaderCard
+            icon="storefront-outline"
+            title={adminDashboard.store.name}
+            subtitle={`${adminDashboard.store.category} · Temps reel`}
+            actionLabel="Voir panel"
+            onActionPress={() => setActiveTab("tracking")}
+          />
 
           <View style={styles.statsGrid}>
-            <View style={styles.statCard}>
-              <Text style={styles.statValue}>{adminDashboard.stats.pendingOrders}</Text>
-              <Text style={styles.statLabel}>A valider</Text>
-            </View>
-            <View style={styles.statCard}>
-              <Text style={styles.statValue}>{adminDashboard.stats.deliveredToday}</Text>
-              <Text style={styles.statLabel}>Livrees aujourd'hui</Text>
-            </View>
+            <ThemeMetricCard
+              icon="clipboard-check-outline"
+              value={String(adminDashboard.stats.pendingOrders)}
+              label="A valider"
+            />
+            <ThemeMetricCard
+              icon="package-variant-closed-check"
+              value={String(adminDashboard.stats.deliveredToday)}
+              label="Livrees aujourd'hui"
+            />
           </View>
 
           <View style={styles.statsGrid}>
-            <View style={styles.statCard}>
-              <Text style={styles.statValue}>
-                {money(adminDashboard.stats.revenueToday)}
-              </Text>
-              <Text style={styles.statLabel}>CA du jour</Text>
-            </View>
-            <View style={styles.statCard}>
-              <Text style={styles.statValue}>{adminDashboard.stats.availableCouriers}</Text>
-              <Text style={styles.statLabel}>Livreurs dispo</Text>
-            </View>
+            <ThemeMetricCard
+              icon="cash-multiple"
+              value={money(adminDashboard.stats.revenueToday)}
+              label="CA du jour"
+            />
+            <ThemeMetricCard
+              icon="motorbike"
+              value={String(adminDashboard.stats.availableCouriers)}
+              label="Livreurs dispo"
+            />
           </View>
 
           <Text style={styles.sectionSubtitle}>Charge recentre</Text>
@@ -1306,25 +1313,37 @@ export default function App() {
         </View>
       ) : (
         <>
+          <ThemeHeaderCard
+            icon="shield-crown-outline"
+            title="Super Admin Control"
+            subtitle="Pilotage global de la plateforme en temps reel"
+            actionLabel="Actualiser"
+            onActionPress={() => void refreshSuperData()}
+          />
+
           <View style={styles.statsGrid}>
-            <View style={styles.statCard}>
-              <Text style={styles.statValue}>{superDashboard.usersCount}</Text>
-              <Text style={styles.statLabel}>Users</Text>
-            </View>
-            <View style={styles.statCard}>
-              <Text style={styles.statValue}>{superDashboard.storesCount}</Text>
-              <Text style={styles.statLabel}>Restaurants</Text>
-            </View>
+            <ThemeMetricCard
+              icon="account-group-outline"
+              value={String(superDashboard.usersCount)}
+              label="Users"
+            />
+            <ThemeMetricCard
+              icon="storefront-outline"
+              value={String(superDashboard.storesCount)}
+              label="Restaurants"
+            />
           </View>
           <View style={styles.statsGrid}>
-            <View style={styles.statCard}>
-              <Text style={styles.statValue}>{superDashboard.pendingApprovals}</Text>
-              <Text style={styles.statLabel}>A approuver</Text>
-            </View>
-            <View style={styles.statCard}>
-              <Text style={styles.statValue}>{superDashboard.ordersToday}</Text>
-              <Text style={styles.statLabel}>Cmd aujourd'hui</Text>
-            </View>
+            <ThemeMetricCard
+              icon="account-clock-outline"
+              value={String(superDashboard.pendingApprovals)}
+              label="A approuver"
+            />
+            <ThemeMetricCard
+              icon="clipboard-list-outline"
+              value={String(superDashboard.ordersToday)}
+              label="Cmd aujourd'hui"
+            />
           </View>
           <View style={styles.infoCard}>
             <Text style={styles.infoCardTitle}>Repartition roles</Text>
@@ -1433,13 +1452,13 @@ export default function App() {
         </View>
       ) : (
         <>
-          <LinearGradient colors={["#D1FAE5", "#ECFDF5"]} style={styles.heroCard}>
-            <Text style={styles.heroTitle}>{livreurData.courier.name}</Text>
-            <Text style={styles.heroSubtitle}>
-              {livreurData.courier.vehicle} ·{" "}
-              {livreurData.courier.isAvailable ? "Disponible" : "Occupe"}
-            </Text>
-          </LinearGradient>
+          <ThemeHeaderCard
+            icon="motorbike"
+            title={livreurData.courier.name}
+            subtitle={`${livreurData.courier.vehicle} · ${
+              livreurData.courier.isAvailable ? "Disponible" : "Occupe"
+            }`}
+          />
 
           {livreurData.orders.map((order) => (
             <View key={order.id} style={styles.infoCard}>
@@ -1485,18 +1504,11 @@ export default function App() {
 
   const renderProfile = () => (
     <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
-      <Text style={styles.sectionTitle}>Profil</Text>
-      <View style={styles.profileCard}>
-        <View style={styles.avatarCircle}>
-          <MaterialCommunityIcons name="account" size={24} color="#FFFFFF" />
-        </View>
-        <View>
-          <Text style={styles.profileName}>{currentUser?.name}</Text>
-          <Text style={styles.profileHint}>
-            {currentUser?.role} · {currentUser?.email ?? "Invite"}
-          </Text>
-        </View>
-      </View>
+      <ThemeHeaderCard
+        icon="account-circle-outline"
+        title={currentUser?.name ?? "Profil"}
+        subtitle={`${currentUser?.role ?? "USER"} · ${currentUser?.email ?? "Invite"}`}
+      />
 
       <View style={styles.infoCard}>
         <Text style={styles.infoCardTitle}>Acces</Text>
@@ -1574,12 +1586,11 @@ export default function App() {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="dark" />
       <LinearGradient colors={["#F9FAFB", "#F3F4F6"]} style={styles.authScreen}>
-        <View style={styles.authHeader}>
-          <Text style={styles.authTitle}>Livraison Pro</Text>
-          <Text style={styles.authSubtitle}>
-            Sign In / Sign Up moderne avec roles et validation Super Admin
-          </Text>
-        </View>
+        <ThemeHeaderCard
+          icon="food-fork-drink"
+          title="Livraison Pro"
+          subtitle="Template moderne: Sign In / Sign Up avec validation Super Admin"
+        />
 
         <View style={styles.authCard}>
           {errorMessage ? (
