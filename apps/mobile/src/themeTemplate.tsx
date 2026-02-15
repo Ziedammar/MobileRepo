@@ -1,7 +1,7 @@
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
-import { LinearGradient } from "expo-linear-gradient";
 import React from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
+import { Avatar, Button, Card, Surface, Text } from "react-native-paper";
 
 type IconName = keyof typeof MaterialCommunityIcons.glyphMap;
 
@@ -27,45 +27,62 @@ export function ThemeHeaderCard({
   onActionPress,
 }: ThemeHeaderCardProps) {
   return (
-    <LinearGradient colors={["#FFFFFF", "#F8FAFC"]} style={styles.headerCard}>
-      <View style={styles.headerMain}>
-        <View style={styles.iconWrap}>
-          <MaterialCommunityIcons name={icon} size={20} color="#00A082" />
-        </View>
+    <Card mode="outlined" style={styles.headerCard}>
+      <Card.Content style={styles.headerMain}>
+        <Avatar.Icon
+          size={38}
+          style={styles.iconWrap}
+          color="#00A082"
+          icon={({ size, color }) => (
+            <MaterialCommunityIcons name={icon} size={size} color={color} />
+          )}
+        />
         <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>{title}</Text>
-          <Text style={styles.headerSubtitle}>{subtitle}</Text>
+          <Text variant="titleMedium" style={styles.headerTitle}>
+            {title}
+          </Text>
+          <Text variant="bodyMedium" style={styles.headerSubtitle}>
+            {subtitle}
+          </Text>
         </View>
-      </View>
+      </Card.Content>
       {actionLabel && onActionPress ? (
-        <Pressable style={styles.headerAction} onPress={onActionPress}>
-          <Text style={styles.headerActionText}>{actionLabel}</Text>
-        </Pressable>
+        <Card.Actions style={styles.cardActions}>
+          <Button mode="contained-tonal" onPress={onActionPress}>
+            {actionLabel}
+          </Button>
+        </Card.Actions>
       ) : null}
-    </LinearGradient>
+    </Card>
   );
 }
 
 export function ThemeMetricCard({ icon, value, label }: ThemeMetricCardProps) {
   return (
-    <View style={styles.metricCard}>
-      <View style={styles.metricIconWrap}>
-        <MaterialCommunityIcons name={icon} size={16} color="#00A082" />
-      </View>
-      <Text style={styles.metricValue}>{value}</Text>
-      <Text style={styles.metricLabel}>{label}</Text>
-    </View>
+    <Surface style={styles.metricCard} elevation={0}>
+      <Avatar.Icon
+        size={28}
+        style={styles.metricIconWrap}
+        color="#00A082"
+        icon={({ size, color }) => (
+          <MaterialCommunityIcons name={icon} size={size} color={color} />
+        )}
+      />
+      <Text variant="headlineSmall" style={styles.metricValue}>
+        {value}
+      </Text>
+      <Text variant="bodySmall" style={styles.metricLabel}>
+        {label}
+      </Text>
+    </Surface>
   );
 }
 
 const styles = StyleSheet.create({
   headerCard: {
     borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    padding: 14,
     marginBottom: 12,
-    gap: 12,
+    backgroundColor: "#FFFFFF",
   },
   headerMain: {
     flexDirection: "row",
@@ -73,12 +90,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   iconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
     backgroundColor: "#E6FFFA",
-    alignItems: "center",
-    justifyContent: "center",
   },
   headerContent: {
     flex: 1,
@@ -86,25 +98,15 @@ const styles = StyleSheet.create({
   headerTitle: {
     color: "#0F172A",
     fontWeight: "800",
-    fontSize: 17,
   },
   headerSubtitle: {
     color: "#475569",
-    marginTop: 4,
-    lineHeight: 18,
+    marginTop: 2,
   },
-  headerAction: {
-    alignSelf: "flex-start",
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: "#00A082",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  headerActionText: {
-    color: "#00796B",
-    fontWeight: "700",
-    fontSize: 12,
+  cardActions: {
+    justifyContent: "flex-start",
+    paddingHorizontal: 8,
+    paddingBottom: 10,
   },
   metricCard: {
     flex: 1,
@@ -116,17 +118,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   metricIconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
     backgroundColor: "#ECFDF5",
-    alignItems: "center",
-    justifyContent: "center",
     marginBottom: 8,
   },
   metricValue: {
     color: "#00A082",
-    fontSize: 21,
     fontWeight: "800",
     textAlign: "center",
   },
@@ -134,6 +130,5 @@ const styles = StyleSheet.create({
     color: "#64748B",
     marginTop: 4,
     textAlign: "center",
-    fontSize: 12,
   },
 });

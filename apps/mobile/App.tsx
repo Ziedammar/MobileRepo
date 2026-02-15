@@ -3,6 +3,13 @@ import { StatusBar } from "expo-status-bar";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  Appbar,
+  BottomNavigation,
+  MD3LightTheme,
+  PaperProvider,
+  Snackbar,
+} from "react-native-paper";
+import {
   ActivityIndicator,
   Image,
   Pressable,
@@ -93,6 +100,20 @@ const livreurTabs: typeof clientTabs = [
 const money = (value: number): string => `${value.toFixed(2)} DT`;
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : "Une erreur inattendue est survenue";
+
+const internetPaperTheme = {
+  ...MD3LightTheme,
+  colors: {
+    ...MD3LightTheme.colors,
+    primary: "#00A082",
+    secondary: "#0F766E",
+    background: "#F8FAFC",
+    surface: "#FFFFFF",
+    surfaceVariant: "#ECFDF5",
+    outline: "#CBD5E1",
+    error: "#B91C1C",
+  },
+};
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabKey>("home");
@@ -1582,6 +1603,35 @@ export default function App() {
     }
   };
 
+  const activeTabLabel =
+    roleTabs.find((tab) => tab.key === activeTab)?.label ?? "Dashboard";
+
+  const refreshCurrentContext = () => {
+    if (!currentUser) {
+      return;
+    }
+
+    if (currentUser.role === "CLIENT") {
+      void refreshHome(true);
+      if (selectedStore?.id) {
+        void openStore(selectedStore.id);
+      }
+      return;
+    }
+
+    if (currentUser.role === "ADMIN") {
+      void refreshAdminData();
+      return;
+    }
+
+    if (currentUser.role === "SUPER_ADMIN") {
+      void refreshSuperData();
+      return;
+    }
+
+    void refreshLivreurData();
+  };
+
   const renderAuthScreen = () => (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="dark" />
@@ -1755,50 +1805,72 @@ export default function App() {
   );
 
   if (!currentUser || !sessionToken) {
-    return renderAuthScreen();
+    return <PaperProvider theme={internetPaperTheme}>{renderAuthScreen()}</PaperProvider>;
   }
 
-  return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="dark" />
-      <View style={styles.root}>
-        {errorMessage ? (
-          <View style={styles.errorBanner}>
-            <MaterialCommunityIcons name="alert-circle-outline" size={16} color="#FCA5A5" />
-            <Text style={styles.errorBannerText}>{errorMessage}</Text>
-          </View>
-        ) : null}
-        {infoMessage ? (
-          <View style={styles.infoBanner}>
-            <MaterialCommunityIcons name="information-outline" size={16} color="#7DD3FC" />
-            <Text style={styles.infoBannerText}>{infoMessage}</Text>
-          </View>
-        ) : null}
+  const navigationState = {
+    index: Math.max(
+      0,
+      roleTabs.findIndex((tab) => tab.key === activeTab),
+    ),
+    routes: roleTabs.map((tab) => ({
+      key: tab.key,
+      title: tab.label,
+      focusedIcon: tab.icon,
+    })),
+  };
 
-        <View style={styles.content}>{renderRoleContent()}</View>
-        <View style={styles.tabBar}>
-          {roleTabs.map((tab) => {
-            const isActive = tab.key === activeTab;
-            return (
-              <Pressable
-                key={tab.key}
-                style={styles.tabItem}
-                onPress={() => setActiveTab(tab.key)}
-              >
-                <MaterialCommunityIcons
-                  name={tab.icon}
-                  size={20}
-                  color={isActive ? "#00A082" : "#94A3B8"}
-                />
-                <Text style={[styles.tabLabel, isActive ? styles.tabLabelActive : null]}>
-                  {tab.label}
-                </Text>
-              </Pressable>
-            );
-          })}
+  return (
+    <PaperProvider theme={internetPaperTheme}>
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar style="dark" />
+        <View style={styles.root}>
+          <Appbar.Header mode="small" style={styles.paperAppbar}>
+            <Appbar.Content
+              title="Livraison Pro"
+              subtitle={`${currentUser.role} · ${activeTabLabel}`}
+            />
+            <Appbar.Action icon="refresh" onPress={refreshCurrentContext} />
+            <Appbar.Action icon="account-circle-outline" onPress={() => setActiveTab("profile")} />
+          </Appbar.Header>
+
+          <View style={styles.content}>{renderRoleContent()}</View>
+          <BottomNavigation.Bar
+            navigationState={navigationState}
+            onTabPress={({ route }) => setActiveTab(route.key as TabKey)}
+            renderIcon={({ route, color }) => (
+              <MaterialCommunityIcons
+                name={
+                  ((route as { focusedIcon?: keyof typeof MaterialCommunityIcons.glyphMap })
+                    .focusedIcon ?? "circle-outline") as keyof typeof MaterialCommunityIcons.glyphMap
+                }
+                size={20}
+                color={color}
+              />
+            )}
+            activeColor="#00A082"
+            inactiveColor="#94A3B8"
+            style={styles.paperBottomBar}
+          />
         </View>
-      </View>
-    </SafeAreaView>
+        <Snackbar
+          visible={Boolean(errorMessage)}
+          onDismiss={() => setErrorMessage(null)}
+          duration={3600}
+          style={styles.paperErrorSnackbar}
+        >
+          {errorMessage}
+        </Snackbar>
+        <Snackbar
+          visible={Boolean(infoMessage)}
+          onDismiss={() => setInfoMessage(null)}
+          duration={2600}
+          style={styles.paperInfoSnackbar}
+        >
+          {infoMessage}
+        </Snackbar>
+      </SafeAreaView>
+    </PaperProvider>
   );
 }
 
@@ -1812,6 +1884,22 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  paperAppbar: {
+    backgroundColor: "#FFFFFF",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+  },
+  paperBottomBar: {
+    backgroundColor: "#FFFFFF",
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+  },
+  paperErrorSnackbar: {
+    backgroundColor: "#B91C1C",
+  },
+  paperInfoSnackbar: {
+    backgroundColor: "#065F46",
   },
   authScreen: {
     flex: 1,
