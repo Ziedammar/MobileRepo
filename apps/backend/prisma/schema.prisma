@@ -99,7 +99,10 @@ model Product {
   storeId     String
   name        String
   description String
+  category    String   @default("General")
   price       Float
+  stock       Int      @default(0)
+  isAvailable Boolean  @default(true)
   imageUrl    String
   isPopular   Boolean  @default(false)
   createdAt   DateTime @default(now())

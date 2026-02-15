@@ -29,7 +29,10 @@ export type Product = {
   storeId?: string;
   name: string;
   description: string;
+  category?: string;
   price: number;
+  stock?: number;
+  isAvailable?: boolean;
   imageUrl: string;
   isPopular?: boolean;
 };

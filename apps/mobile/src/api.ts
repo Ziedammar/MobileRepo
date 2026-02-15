@@ -122,6 +122,15 @@ export const api = {
     ),
 
   getAdminDashboard: () => request<AdminDashboardResponse>("/admin/dashboard"),
+  getAdminStore: () =>
+    request<{
+      id: string;
+      name: string;
+      category: string;
+      description: string;
+      products: Product[];
+      couriers: Courier[];
+    }>("/admin/store"),
   getAdminOrders: () => request<AdminOrder[]>("/admin/orders"),
   adminDecideOrder: (
     orderId: string,
@@ -140,7 +149,10 @@ export const api = {
   createAdminProduct: (payload: {
     name: string;
     description: string;
+    category: string;
     price: number;
+    stock: number;
+    isAvailable?: boolean;
     imageUrl: string;
     isPopular?: boolean;
   }) =>
@@ -153,7 +165,10 @@ export const api = {
     payload: Partial<{
       name: string;
       description: string;
+      category: string;
       price: number;
+      stock: number;
+      isAvailable: boolean;
       imageUrl: string;
       isPopular: boolean;
     }>,

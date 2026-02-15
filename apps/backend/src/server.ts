@@ -132,7 +132,10 @@ const adminDecisionSchema = z.object({
 const createProductSchema = z.object({
   name: z.string().trim().min(2).max(100),
   description: z.string().trim().min(2).max(300),
+  category: z.string().trim().min(2).max(60),
   price: z.number().positive(),
+  stock: z.number().int().min(0).max(9999),
+  isAvailable: z.boolean().optional(),
   imageUrl: z.string().url(),
   isPopular: z.boolean().optional(),
 });
@@ -141,7 +144,10 @@ const patchProductSchema = z
   .object({
     name: z.string().trim().min(2).max(100).optional(),
     description: z.string().trim().min(2).max(300).optional(),
+    category: z.string().trim().min(2).max(60).optional(),
     price: z.number().positive().optional(),
+    stock: z.number().int().min(0).max(9999).optional(),
+    isAvailable: z.boolean().optional(),
     imageUrl: z.string().url().optional(),
     isPopular: z.boolean().optional(),
   })
@@ -692,6 +698,29 @@ function canAccessOrder(
   return false;
 }
 
+async function restockOrderItems(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+): Promise<void> {
+  const items = await tx.orderItem.findMany({
+    where: { orderId },
+    select: {
+      productId: true,
+      quantity: true,
+    },
+  });
+
+  for (const item of items) {
+    await tx.product.update({
+      where: { id: item.productId },
+      data: {
+        stock: { increment: item.quantity },
+        isAvailable: true,
+      },
+    });
+  }
+}
+
 async function syncOrderStatus(orderId: string): Promise<OrderStatus | null> {
   const order = await prisma.order.findUnique({
     where: { id: orderId },
@@ -1067,10 +1096,15 @@ app.get("/home", async () => {
   const stores = await prisma.store.findMany({
     include: {
       products: {
-        where: { isPopular: true },
+        where: {
+          isPopular: true,
+          isAvailable: true,
+          stock: { gt: 0 },
+        },
         select: {
           id: true,
           name: true,
+          category: true,
           price: true,
           imageUrl: true,
         },
@@ -1113,10 +1147,15 @@ app.get("/stores", async () => {
   const stores = await prisma.store.findMany({
     include: {
       products: {
-        where: { isPopular: true },
+        where: {
+          isPopular: true,
+          isAvailable: true,
+          stock: { gt: 0 },
+        },
         select: {
           id: true,
           name: true,
+          category: true,
           price: true,
           imageUrl: true,
         },
@@ -1153,6 +1192,10 @@ app.get("/stores/:storeId", async (request, reply) => {
     where: { id: params.storeId },
     include: {
       products: {
+        where: {
+          isAvailable: true,
+          stock: { gt: 0 },
+        },
         orderBy: [{ isPopular: "desc" }, { createdAt: "asc" }],
       },
       adminUser: {
@@ -1197,70 +1240,140 @@ app.post("/orders", async (request, reply) => {
   }
 
   const body = createOrderSchema.parse(request.body);
+  let order: Prisma.OrderGetPayload<{ include: { store: true } }> | null = null;
+  try {
+    order = await prisma.$transaction(async (tx) => {
+      const store = await tx.store.findUnique({ where: { id: body.storeId } });
+      if (!store) {
+        throw new Error("STORE_NOT_FOUND");
+      }
 
-  const store = await prisma.store.findUnique({ where: { id: body.storeId } });
-  if (!store) {
-    return reply.status(404).send({ message: "Store not found" });
-  }
-
-  const uniqueProductIds = [...new Set(body.items.map((item) => item.productId))];
-  const products = await prisma.product.findMany({
-    where: {
-      id: { in: uniqueProductIds },
-      storeId: store.id,
-    },
-  });
-
-  if (products.length !== uniqueProductIds.length) {
-    return reply.status(400).send({ message: "Invalid products for store" });
-  }
-
-  const productsById = new Map(products.map((product) => [product.id, product]));
-  const subtotal = body.items.reduce((runningTotal, item) => {
-    const product = productsById.get(item.productId);
-    if (!product) {
-      return runningTotal;
-    }
-    return runningTotal + product.price * item.quantity;
-  }, 0);
-
-  const deliveryFee = store.deliveryFee;
-  const total = Number((subtotal + deliveryFee).toFixed(2));
-
-  const order = await prisma.order.create({
-    data: {
-      userId: auth.sub,
-      storeId: store.id,
-      status: OrderStatus.PENDING,
-      paymentStatus: PaymentStatus.PENDING,
-      subtotal: Number(subtotal.toFixed(2)),
-      deliveryFee,
-      total,
-      addressText: body.addressText,
-      addressLat: body.addressLat,
-      addressLng: body.addressLng,
-      items: {
-        create: body.items.map((item) => {
-          const product = productsById.get(item.productId)!;
-          return {
-            productId: product.id,
-            nameSnapshot: product.name,
-            priceSnapshot: product.price,
-            quantity: item.quantity,
-          };
-        }),
-      },
-      events: {
-        create: {
-          status: OrderStatus.PENDING,
-          label: statusLabel(OrderStatus.PENDING),
+      const uniqueProductIds = [...new Set(body.items.map((item) => item.productId))];
+      const products = await tx.product.findMany({
+        where: {
+          id: { in: uniqueProductIds },
+          storeId: store.id,
         },
-      },
-    },
-    include: {
-      store: true,
-    },
-  });
+      });
+
+      if (products.length !== uniqueProductIds.length) {
+        throw new Error("INVALID_PRODUCTS");
+      }
+
+      const productsById = new Map(products.map((product) => [product.id, product]));
+      const subtotal = body.items.reduce((runningTotal, item) => {
+        const product = productsById.get(item.productId);
+        if (!product) {
+          return runningTotal;
+        }
+        return runningTotal + product.price * item.quantity;
+      }, 0);
+
+      const requestedByProductId = body.items.reduce((accumulator, item) => {
+        accumulator.set(
+          item.productId,
+          (accumulator.get(item.productId) ?? 0) + item.quantity,
+        );
+        return accumulator;
+      }, new Map<string, number>());
+
+      for (const [productId, requestedQuantity] of requestedByProductId.entries()) {
+        const product = productsById.get(productId);
+        if (!product) {
+          throw new Error("INVALID_PRODUCTS");
+        }
+
+        if (!product.isAvailable || product.stock <= 0) {
+          throw new Error(`PRODUCT_UNAVAILABLE:${product.name}`);
+        }
+
+        if (requestedQuantity > product.stock) {
+          throw new Error(`PRODUCT_STOCK_LOW:${product.name}`);
+        }
+      }
+
+      const deliveryFee = store.deliveryFee;
+      const total = Number((subtotal + deliveryFee).toFixed(2));
+
+      const createdOrder = await tx.order.create({
+        data: {
+          userId: auth.sub,
+          storeId: store.id,
+          status: OrderStatus.PENDING,
+          paymentStatus: PaymentStatus.PENDING,
+          subtotal: Number(subtotal.toFixed(2)),
+          deliveryFee,
+          total,
+          addressText: body.addressText,
+          addressLat: body.addressLat,
+          addressLng: body.addressLng,
+          items: {
+            create: body.items.map((item) => {
+              const product = productsById.get(item.productId)!;
+              return {
+                productId: product.id,
+                nameSnapshot: product.name,
+                priceSnapshot: product.price,
+                quantity: item.quantity,
+              };
+            }),
+          },
+          events: {
+            create: {
+              status: OrderStatus.PENDING,
+              label: statusLabel(OrderStatus.PENDING),
+            },
+          },
+        },
+        include: {
+          store: true,
+        },
+      });
+
+      for (const [productId, requestedQuantity] of requestedByProductId.entries()) {
+        const product = productsById.get(productId)!;
+        const remainingStock = product.stock - requestedQuantity;
+
+        await tx.product.update({
+          where: { id: product.id },
+          data: {
+            stock: { decrement: requestedQuantity },
+            isAvailable: remainingStock > 0 ? undefined : false,
+          },
+        });
+      }
+
+      return createdOrder;
+    });
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.message === "STORE_NOT_FOUND") {
+        return reply.status(404).send({ message: "Store not found" });
+      }
+      if (error.message === "INVALID_PRODUCTS") {
+        return reply.status(400).send({ message: "Invalid products for store" });
+      }
+      if (error.message.startsWith("PRODUCT_UNAVAILABLE:")) {
+        return reply
+          .status(400)
+          .send({
+            message: `Produit indisponible: ${error.message.split(":")[1]}`,
+          });
+      }
+      if (error.message.startsWith("PRODUCT_STOCK_LOW:")) {
+        return reply
+          .status(400)
+          .send({
+            message: `Stock insuffisant pour: ${error.message.split(":")[1]}`,
+          });
+      }
+    }
+    throw error;
+  }
+
+  if (!order) {
+    return reply.status(500).send({ message: "Order creation failed" });
+  }
 
   publishRealtime(order.id, order.storeId, "created");
 
@@ -1530,6 +1643,8 @@ app.post("/orders/:orderId/cancel", async (request, reply) => {
       },
     });
 
+    await restockOrderItems(tx, orderMeta.id);
+
     await tx.orderStatusEvent.create({
       data: {
         orderId: orderMeta.id,
@@ -1589,6 +1704,49 @@ app.get("/admin/dashboard", async (request, reply) => {
     },
     stats,
   };
+});
+
+app.get("/admin/store", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+    ensureRole(auth, [UserRole.ADMIN]);
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const store = await prisma.store.findUnique({
+    where: { adminUserId: auth.sub },
+    include: {
+      products: {
+        orderBy: [{ isAvailable: "desc" }, { isPopular: "desc" }, { createdAt: "asc" }],
+      },
+      couriers: {
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+        orderBy: [{ isAvailable: "desc" }, { rating: "desc" }],
+      },
+    },
+  });
+
+  if (!store) {
+    return reply.status(404).send({ message: "Admin store not configured" });
+  }
+
+  return store;
 });
 
 app.get("/admin/orders", async (request, reply) => {
@@ -1779,6 +1937,8 @@ app.patch("/admin/orders/:orderId/decision", async (request, reply) => {
       },
     });
 
+    await restockOrderItems(tx, order.id);
+
     await tx.orderStatusEvent.create({
       data: {
         orderId: order.id,
@@ -1857,7 +2017,10 @@ app.post("/admin/products", async (request, reply) => {
       storeId: store.id,
       name: body.name,
       description: body.description,
+      category: body.category,
       price: body.price,
+      stock: body.stock,
+      isAvailable: body.isAvailable ?? body.stock > 0,
       imageUrl: body.imageUrl,
       isPopular: body.isPopular ?? false,
     },
@@ -1899,9 +2062,14 @@ app.patch("/admin/products/:productId", async (request, reply) => {
     return reply.status(404).send({ message: "Product not found for your store" });
   }
 
+  const data: Prisma.ProductUpdateInput = { ...body };
+  if (typeof body.stock === "number" && body.isAvailable === undefined) {
+    data.isAvailable = body.stock > 0;
+  }
+
   const updated = await prisma.product.update({
     where: { id: product.id },
-    data: body,
+    data,
   });
 
   publishDashboardRefresh(store.id, "product_updated");

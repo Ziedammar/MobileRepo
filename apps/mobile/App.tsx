@@ -45,6 +45,17 @@ type CartItem = {
 };
 
 type AuthMode = "signin" | "signup";
+type SignupRole = "CLIENT" | "ADMIN" | "LIVREUR";
+
+const signupRoles: Array<{
+  role: SignupRole;
+  label: string;
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+}> = [
+  { role: "CLIENT", label: "Client", icon: "account-outline" },
+  { role: "ADMIN", label: "Admin", icon: "storefront-outline" },
+  { role: "LIVREUR", label: "Livreur", icon: "motorbike" },
+];
 
 const clientTabs: Array<{
   key: TabKey;
@@ -111,13 +122,24 @@ export default function App() {
 
   const [adminDashboard, setAdminDashboard] =
     useState<AdminDashboardResponse | null>(null);
+  const [adminStore, setAdminStore] = useState<{
+    id: string;
+    name: string;
+    category: string;
+    description: string;
+    products: Product[];
+    couriers: Courier[];
+  } | null>(null);
   const [adminOrders, setAdminOrders] = useState<AdminOrder[]>([]);
   const [adminProducts, setAdminProducts] = useState<Product[]>([]);
   const [adminCouriers, setAdminCouriers] = useState<Courier[]>([]);
   const [adminProductForm, setAdminProductForm] = useState({
     name: "",
     description: "",
+    category: "Plat principal",
     price: "10",
+    stock: "20",
+    isAvailable: true,
     imageUrl:
       "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1200&q=80",
   });
@@ -161,19 +183,23 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchHome = async () => {
+  const refreshHome = async (showLoader = false) => {
+    if (showLoader) {
       setLoadingHome(true);
-      try {
-        setHome(await api.getHome());
-      } catch (error) {
-        setErrorMessage(errorText(error));
-      } finally {
+    }
+    try {
+      setHome(await api.getHome());
+    } catch (error) {
+      setErrorMessage(errorText(error));
+    } finally {
+      if (showLoader) {
         setLoadingHome(false);
       }
-    };
+    }
+  };
 
-    void fetchHome();
+  useEffect(() => {
+    void refreshHome(true);
   }, []);
 
   useEffect(() => {
@@ -197,6 +223,26 @@ export default function App() {
   };
 
   const submitAuth = async () => {
+    if (authMode === "signup") {
+      if (!authName.trim()) {
+        setErrorMessage("Nom complet obligatoire");
+        return;
+      }
+      if (authRole === "ADMIN" && !authStoreName.trim()) {
+        setErrorMessage("Nom du restaurant obligatoire pour un compte Admin");
+        return;
+      }
+      if (authRole === "LIVREUR" && !authVehicle.trim()) {
+        setErrorMessage("Vehicule obligatoire pour un compte Livreur");
+        return;
+      }
+    }
+
+    if (!authEmail.trim() || !authPassword.trim()) {
+      setErrorMessage("Email et mot de passe obligatoires");
+      return;
+    }
+
     setAuthLoading(true);
     setInfoMessage(null);
     try {
@@ -219,7 +265,13 @@ export default function App() {
 
       applyAuthResponse(response);
     } catch (error) {
-      setErrorMessage(errorText(error));
+      const message = errorText(error);
+      if (message.toLowerCase().includes("en attente de validation")) {
+        setInfoMessage(message);
+        setErrorMessage(null);
+      } else {
+        setErrorMessage(message);
+      }
     } finally {
       setAuthLoading(false);
     }
@@ -307,13 +359,15 @@ export default function App() {
   const refreshAdminData = async () => {
     setLoadingRoleData(true);
     try {
-      const [dashboard, orders, products, couriers] = await Promise.all([
+      const [dashboard, store, orders, products, couriers] = await Promise.all([
         api.getAdminDashboard(),
+        api.getAdminStore(),
         api.getAdminOrders(),
         api.getAdminProducts(),
         api.getAdminCouriers(),
       ]);
       setAdminDashboard(dashboard);
+      setAdminStore(store);
       setAdminOrders(orders);
       setAdminProducts(products);
       setAdminCouriers(couriers);
@@ -381,6 +435,34 @@ export default function App() {
 
     return;
   }, [sessionToken, currentUser?.role]);
+
+  useEffect(() => {
+    if (currentUser?.role !== "CLIENT") {
+      return;
+    }
+
+    void refreshHome();
+    const interval = setInterval(() => void refreshHome(), 8000);
+    return () => clearInterval(interval);
+  }, [currentUser?.role]);
+
+  useEffect(() => {
+    if (currentUser?.role !== "CLIENT" || !selectedStore?.id) {
+      return;
+    }
+
+    const pollStore = async () => {
+      try {
+        const latest = await api.getStore(selectedStore.id);
+        setSelectedStore(latest);
+      } catch {
+        // ignore temporary polling errors
+      }
+    };
+
+    const interval = setInterval(() => void pollStore(), 8000);
+    return () => clearInterval(interval);
+  }, [currentUser?.role, selectedStore?.id]);
 
   useEffect(() => {
     if (!sessionToken || currentUser?.role !== "ADMIN") {
@@ -546,15 +628,43 @@ export default function App() {
   };
 
   const createAdminProduct = async () => {
+    if (
+      !adminProductForm.name.trim() ||
+      !adminProductForm.description.trim() ||
+      !adminProductForm.category.trim()
+    ) {
+      setErrorMessage("Remplis nom, description et categorie du produit");
+      return;
+    }
+
+    const parsedPrice = Number(adminProductForm.price);
+    const parsedStock = Number(adminProductForm.stock);
+    if (!Number.isFinite(parsedPrice) || parsedPrice <= 0) {
+      setErrorMessage("Prix invalide");
+      return;
+    }
+    if (!Number.isFinite(parsedStock) || parsedStock < 0) {
+      setErrorMessage("Stock invalide");
+      return;
+    }
+
     try {
       await api.createAdminProduct({
         name: adminProductForm.name,
         description: adminProductForm.description,
-        price: Number(adminProductForm.price),
+        category: adminProductForm.category,
+        price: parsedPrice,
+        stock: parsedStock,
+        isAvailable: adminProductForm.isAvailable,
         imageUrl: adminProductForm.imageUrl,
         isPopular: true,
       });
-      setAdminProductForm((prev) => ({ ...prev, name: "", description: "" }));
+      setAdminProductForm((prev) => ({
+        ...prev,
+        name: "",
+        description: "",
+        stock: "20",
+      }));
       await refreshAdminData();
       setInfoMessage("Produit ajoute");
     } catch (error) {
@@ -593,6 +703,11 @@ export default function App() {
     action: "approve" | "reject",
     role: "ADMIN" | "LIVREUR",
   ) => {
+    if (action === "approve" && role === "LIVREUR" && !reviewStoreId.trim()) {
+      setErrorMessage("Pour un livreur, renseigne Store ID avant approbation");
+      return;
+    }
+
     try {
       await api.reviewPendingUser(userId, {
         action,
@@ -648,7 +763,7 @@ export default function App() {
               style={styles.iconButton}
               onPress={() => setSelectedStore(null)}
             >
-              <MaterialCommunityIcons name="chevron-left" size={22} color="#E6EDFF" />
+              <MaterialCommunityIcons name="chevron-left" size={22} color="#1F2937" />
             </Pressable>
             <Text style={styles.sectionTitle}>{selectedStore.name}</Text>
             <View style={{ width: 32 }} />
@@ -664,13 +779,16 @@ export default function App() {
                 <View style={styles.productContent}>
                   <Text style={styles.productName}>{product.name}</Text>
                   <Text style={styles.productDescription}>{product.description}</Text>
+                  <Text style={styles.productMeta}>
+                    {product.category ?? "General"} · Stock: {product.stock ?? 0}
+                  </Text>
                   <View style={styles.rowBetween}>
                     <Text style={styles.productPrice}>{money(product.price)}</Text>
                     <Pressable
                       style={styles.addButton}
                       onPress={() => addProductToCart(selectedStore.id, product)}
                     >
-                      <MaterialCommunityIcons name="plus" size={16} color="#0B1020" />
+                      <MaterialCommunityIcons name="plus" size={16} color="#FFFFFF" />
                     </Pressable>
                   </View>
                 </View>
@@ -684,7 +802,7 @@ export default function App() {
     if (loadingHome) {
       return (
         <View style={styles.centeredState}>
-          <ActivityIndicator size="large" color="#22D3EE" />
+          <ActivityIndicator size="large" color="#00A082" />
           <Text style={styles.centeredStateText}>Chargement...</Text>
         </View>
       );
@@ -700,18 +818,18 @@ export default function App() {
 
     return (
       <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
-        <LinearGradient colors={["#121B3A", "#1E293B"]} style={styles.heroCard}>
+        <LinearGradient colors={["#D1FAE5", "#ECFDF5"]} style={styles.heroCard}>
           <Text style={styles.heroTitle}>{home.hero.title}</Text>
           <Text style={styles.heroSubtitle}>{home.hero.subtitle}</Text>
         </LinearGradient>
 
         <View style={styles.searchBox}>
-          <MaterialCommunityIcons name="magnify" size={18} color="#93A1C6" />
+          <MaterialCommunityIcons name="magnify" size={18} color="#64748B" />
           <TextInput
             value={searchValue}
             onChangeText={setSearchValue}
             placeholder="Rechercher un restaurant"
-            placeholderTextColor="#7A89AF"
+            placeholderTextColor="#94A3B8"
             style={styles.searchInput}
           />
         </View>
@@ -760,6 +878,15 @@ export default function App() {
             </View>
           </Pressable>
         ))}
+        {filteredStores.length === 0 ? (
+          <View style={styles.emptyBox}>
+            <MaterialCommunityIcons name="store-search-outline" size={28} color="#00A082" />
+            <Text style={styles.emptyBoxText}>
+              Aucun restaurant pour le moment. Cree un compte Admin, fais valider par Super
+              Admin, puis ajoute des produits.
+            </Text>
+          </View>
+        ) : null}
       </ScrollView>
     );
   };
@@ -790,14 +917,14 @@ export default function App() {
                   style={styles.quantityButton}
                   onPress={() => changeCartQuantity(item.product.id, -1)}
                 >
-                  <MaterialCommunityIcons name="minus" size={16} color="#E6EDFF" />
+                  <MaterialCommunityIcons name="minus" size={16} color="#1F2937" />
                 </Pressable>
                 <Text style={styles.quantityValue}>{item.quantity}</Text>
                 <Pressable
                   style={styles.quantityButton}
                   onPress={() => changeCartQuantity(item.product.id, 1)}
                 >
-                  <MaterialCommunityIcons name="plus" size={16} color="#E6EDFF" />
+                  <MaterialCommunityIcons name="plus" size={16} color="#1F2937" />
                 </Pressable>
               </View>
             </View>
@@ -809,7 +936,7 @@ export default function App() {
               value={addressText}
               onChangeText={setAddressText}
               placeholder="Adresse de livraison"
-              placeholderTextColor="#7A89AF"
+              placeholderTextColor="#94A3B8"
               style={styles.addressInput}
             />
           </View>
@@ -839,7 +966,7 @@ export default function App() {
             disabled={processingCheckout}
           >
             {processingCheckout ? (
-              <ActivityIndicator size="small" color="#0B1020" />
+              <ActivityIndicator size="small" color="#FFFFFF" />
             ) : (
               <Text style={styles.checkoutButtonText}>
                 Commander + paiement instantane
@@ -864,7 +991,7 @@ export default function App() {
         </View>
       ) : (
         <>
-          <LinearGradient colors={["#163A73", "#1E3A8A"]} style={styles.trackingHero}>
+          <LinearGradient colors={["#E0F2FE", "#ECFDF5"]} style={styles.trackingHero}>
             <Text style={styles.trackingStatus}>{orderDetails.statusLabel}</Text>
             <Text style={styles.trackingEta}>Paiement: {orderDetails.paymentStatus}</Text>
             <Text style={styles.trackingEta}>ETA {tracking.etaMinutes} min</Text>
@@ -912,14 +1039,14 @@ export default function App() {
       {!adminDashboard ? (
         <View style={styles.emptyBox}>
           {loadingRoleData ? (
-            <ActivityIndicator size="small" color="#22D3EE" />
+            <ActivityIndicator size="small" color="#00A082" />
           ) : (
             <Text style={styles.emptyBoxText}>Aucune donnee dashboard</Text>
           )}
         </View>
       ) : (
         <>
-          <LinearGradient colors={["#153757", "#1C4A75"]} style={styles.heroCard}>
+          <LinearGradient colors={["#D1FAE5", "#ECFDF5"]} style={styles.heroCard}>
             <Text style={styles.heroTitle}>{adminDashboard.store.name}</Text>
             <Text style={styles.heroSubtitle}>
               {adminDashboard.store.category} · Temps reel
@@ -959,6 +1086,25 @@ export default function App() {
               </View>
             ))}
           </View>
+
+          {adminStore ? (
+            <Pressable style={styles.infoCard} onPress={() => setActiveTab("tracking")}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.infoCardTitle}>Panel restaurant</Text>
+                <MaterialCommunityIcons
+                  name="storefront-outline"
+                  size={18}
+                  color="#00A082"
+                />
+              </View>
+              <Text style={styles.infoCardText}>
+                {adminStore.name} · {adminStore.category}
+              </Text>
+              <Text style={styles.infoCardText}>
+                {adminStore.products.length} produits · {adminStore.couriers.length} livreurs
+              </Text>
+            </Pressable>
+          ) : null}
         </>
       )}
     </ScrollView>
@@ -1003,15 +1149,27 @@ export default function App() {
     <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
       <Text style={styles.sectionTitle}>Produits & Livreurs</Text>
 
+      {adminStore ? (
+        <View style={styles.infoCard}>
+          <Text style={styles.infoCardTitle}>
+            {adminStore.name} · {adminStore.category}
+          </Text>
+          <Text style={styles.infoCardText}>{adminStore.description}</Text>
+          <Text style={styles.infoCardText}>
+            Produits: {adminProducts.length} · Livreurs: {adminCouriers.length}
+          </Text>
+        </View>
+      ) : null}
+
       <View style={styles.infoCard}>
-        <Text style={styles.infoCardTitle}>Ajouter un produit</Text>
+        <Text style={styles.infoCardTitle}>Ajouter un produit complet</Text>
         <TextInput
           value={adminProductForm.name}
           onChangeText={(value) =>
             setAdminProductForm((prev) => ({ ...prev, name: value }))
           }
           placeholder="Nom produit"
-          placeholderTextColor="#7A89AF"
+          placeholderTextColor="#94A3B8"
           style={styles.authInput}
         />
         <TextInput
@@ -1020,7 +1178,16 @@ export default function App() {
             setAdminProductForm((prev) => ({ ...prev, description: value }))
           }
           placeholder="Description"
-          placeholderTextColor="#7A89AF"
+          placeholderTextColor="#94A3B8"
+          style={styles.authInput}
+        />
+        <TextInput
+          value={adminProductForm.category}
+          onChangeText={(value) =>
+            setAdminProductForm((prev) => ({ ...prev, category: value }))
+          }
+          placeholder="Categorie (ex: Burgers, Sushi, Boissons)"
+          placeholderTextColor="#94A3B8"
           style={styles.authInput}
         />
         <TextInput
@@ -1029,10 +1196,43 @@ export default function App() {
             setAdminProductForm((prev) => ({ ...prev, price: value }))
           }
           placeholder="Prix"
-          placeholderTextColor="#7A89AF"
+          placeholderTextColor="#94A3B8"
           keyboardType="decimal-pad"
           style={styles.authInput}
         />
+        <TextInput
+          value={adminProductForm.stock}
+          onChangeText={(value) =>
+            setAdminProductForm((prev) => ({ ...prev, stock: value }))
+          }
+          placeholder="Stock disponible"
+          placeholderTextColor="#94A3B8"
+          keyboardType="number-pad"
+          style={styles.authInput}
+        />
+        <TextInput
+          value={adminProductForm.imageUrl}
+          onChangeText={(value) =>
+            setAdminProductForm((prev) => ({ ...prev, imageUrl: value }))
+          }
+          placeholder="URL image produit"
+          placeholderTextColor="#94A3B8"
+          autoCapitalize="none"
+          style={styles.authInput}
+        />
+        <Pressable
+          style={styles.secondaryButton}
+          onPress={() =>
+            setAdminProductForm((prev) => ({
+              ...prev,
+              isAvailable: !prev.isAvailable,
+            }))
+          }
+        >
+          <Text style={styles.secondaryButtonText}>
+            Disponibilite: {adminProductForm.isAvailable ? "Active" : "Inactive"}
+          </Text>
+        </Pressable>
         <Pressable style={styles.checkoutButton} onPress={() => void createAdminProduct()}>
           <Text style={styles.checkoutButtonText}>Ajouter</Text>
         </Pressable>
@@ -1040,10 +1240,27 @@ export default function App() {
 
       {adminProducts.map((product) => (
         <View key={product.id} style={styles.infoCard}>
-          <Text style={styles.infoCardTitle}>{product.name}</Text>
-          <Text style={styles.infoCardText}>{money(product.price)}</Text>
+          <View style={styles.rowBetween}>
+            <Text style={styles.infoCardTitle}>{product.name}</Text>
+            <MaterialCommunityIcons
+              name={product.isAvailable ? "check-circle-outline" : "close-circle-outline"}
+              size={18}
+              color={product.isAvailable ? "#00A082" : "#EF4444"}
+            />
+          </View>
+          <Text style={styles.infoCardText}>
+            {product.category ?? "General"} · {money(product.price)}
+          </Text>
+          <Text style={styles.infoCardText}>Stock: {product.stock ?? 0}</Text>
         </View>
       ))}
+      {adminProducts.length === 0 ? (
+        <View style={styles.emptyBox}>
+          <Text style={styles.emptyBoxText}>
+            Aucun produit. Ajoute ton premier produit pour qu'il apparaisse chez les clients.
+          </Text>
+        </View>
+      ) : null}
 
       <View style={styles.infoCard}>
         <Text style={styles.infoCardTitle}>Associer un Livreur (userId)</Text>
@@ -1051,7 +1268,7 @@ export default function App() {
           value={associateLivreurId}
           onChangeText={setAssociateLivreurId}
           placeholder="cuid utilisateur livreur"
-          placeholderTextColor="#7A89AF"
+          placeholderTextColor="#94A3B8"
           style={styles.authInput}
         />
         <Pressable style={styles.checkoutButton} onPress={() => void associateCourier()}>
@@ -1125,14 +1342,22 @@ export default function App() {
 
   const renderSuperAdminApprovals = () => (
     <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
-      <Text style={styles.sectionTitle}>Validation Admin / Livreur</Text>
+      <View style={styles.rowBetween}>
+        <Text style={styles.sectionTitle}>Validation Admin / Livreur</Text>
+        <Pressable style={styles.iconButton} onPress={() => void refreshSuperData()}>
+          <MaterialCommunityIcons name="refresh" size={18} color="#00A082" />
+        </Pressable>
+      </View>
+      <Text style={styles.supportingText}>
+        En attente: {pendingUsers.length} compte(s)
+      </Text>
       <View style={styles.infoCard}>
         <Text style={styles.infoCardTitle}>Store ID (pour Livreur)</Text>
         <TextInput
           value={reviewStoreId}
           onChangeText={setReviewStoreId}
           placeholder="storeId si besoin"
-          placeholderTextColor="#7A89AF"
+          placeholderTextColor="#94A3B8"
           style={styles.authInput}
         />
       </View>
@@ -1176,16 +1401,25 @@ export default function App() {
     <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
       <Text style={styles.sectionTitle}>Restaurants</Text>
       {superStores.map((store) => (
-        <View key={store.id} style={styles.infoCard}>
+        <Pressable
+          key={store.id}
+          style={styles.infoCard}
+          onPress={() => {
+            setReviewStoreId(store.id);
+            setActiveTab("cart");
+            setInfoMessage(`Store selectionne pour approbation livreur: ${store.name}`);
+          }}
+        >
           <Text style={styles.infoCardTitle}>{store.name}</Text>
           <Text style={styles.infoCardText}>
             {store.category} · Admin: {store.adminUser?.name ?? "Non assigne"}
           </Text>
+          <Text style={styles.infoCardText}>ID: {store.id}</Text>
           <Text style={styles.infoCardText}>
             Produits {store._count.products} · Cmd {store._count.orders} · Livreurs{" "}
             {store._count.couriers}
           </Text>
-        </View>
+        </Pressable>
       ))}
     </ScrollView>
   );
@@ -1199,7 +1433,7 @@ export default function App() {
         </View>
       ) : (
         <>
-          <LinearGradient colors={["#143C62", "#1A4F83"]} style={styles.heroCard}>
+          <LinearGradient colors={["#D1FAE5", "#ECFDF5"]} style={styles.heroCard}>
             <Text style={styles.heroTitle}>{livreurData.courier.name}</Text>
             <Text style={styles.heroSubtitle}>
               {livreurData.courier.vehicle} ·{" "}
@@ -1254,7 +1488,7 @@ export default function App() {
       <Text style={styles.sectionTitle}>Profil</Text>
       <View style={styles.profileCard}>
         <View style={styles.avatarCircle}>
-          <MaterialCommunityIcons name="account" size={24} color="#0B1020" />
+          <MaterialCommunityIcons name="account" size={24} color="#FFFFFF" />
         </View>
         <View>
           <Text style={styles.profileName}>{currentUser?.name}</Text>
@@ -1338,8 +1572,8 @@ export default function App() {
 
   const renderAuthScreen = () => (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="light" />
-      <LinearGradient colors={["#070B17", "#101A34"]} style={styles.authScreen}>
+      <StatusBar style="dark" />
+      <LinearGradient colors={["#F9FAFB", "#F3F4F6"]} style={styles.authScreen}>
         <View style={styles.authHeader}>
           <Text style={styles.authTitle}>Livraison Pro</Text>
           <Text style={styles.authSubtitle}>
@@ -1348,6 +1582,27 @@ export default function App() {
         </View>
 
         <View style={styles.authCard}>
+          {errorMessage ? (
+            <View style={styles.errorBanner}>
+              <MaterialCommunityIcons
+                name="alert-circle-outline"
+                size={16}
+                color="#B91C1C"
+              />
+              <Text style={styles.errorBannerText}>{errorMessage}</Text>
+            </View>
+          ) : null}
+          {infoMessage ? (
+            <View style={styles.infoBanner}>
+              <MaterialCommunityIcons
+                name="information-outline"
+                size={16}
+                color="#065F46"
+              />
+              <Text style={styles.infoBannerText}>{infoMessage}</Text>
+            </View>
+          ) : null}
+
           <View style={styles.authModeRow}>
             <Pressable
               style={[
@@ -1389,11 +1644,12 @@ export default function App() {
                 value={authName}
                 onChangeText={setAuthName}
                 placeholder="Nom complet"
-                placeholderTextColor="#7A89AF"
+                placeholderTextColor="#94A3B8"
                 style={styles.authInput}
               />
               <View style={styles.authRoleRow}>
-                {(["CLIENT", "ADMIN", "LIVREUR"] as const).map((role) => {
+                {signupRoles.map((entry) => {
+                  const role = entry.role;
                   const selected = authRole === role;
                   return (
                     <Pressable
@@ -1401,13 +1657,19 @@ export default function App() {
                       style={[styles.authRoleChip, selected ? styles.authRoleChipActive : null]}
                       onPress={() => setAuthRole(role)}
                     >
+                      <MaterialCommunityIcons
+                        name={entry.icon}
+                        size={16}
+                        color={selected ? "#00796B" : "#64748B"}
+                        style={{ marginBottom: 4 }}
+                      />
                       <Text
                         style={[
                           styles.authRoleText,
                           selected ? styles.authRoleTextActive : null,
                         ]}
                       >
-                        {role}
+                        {entry.label}
                       </Text>
                     </Pressable>
                   );
@@ -1418,7 +1680,7 @@ export default function App() {
                   value={authStoreName}
                   onChangeText={setAuthStoreName}
                   placeholder="Nom restaurant (demande)"
-                  placeholderTextColor="#7A89AF"
+                  placeholderTextColor="#94A3B8"
                   style={styles.authInput}
                 />
               ) : null}
@@ -1427,7 +1689,7 @@ export default function App() {
                   value={authVehicle}
                   onChangeText={setAuthVehicle}
                   placeholder="Vehicule"
-                  placeholderTextColor="#7A89AF"
+                  placeholderTextColor="#94A3B8"
                   style={styles.authInput}
                 />
               ) : null}
@@ -1438,7 +1700,7 @@ export default function App() {
             value={authEmail}
             onChangeText={setAuthEmail}
             placeholder="Email"
-            placeholderTextColor="#7A89AF"
+            placeholderTextColor="#94A3B8"
             keyboardType="email-address"
             autoCapitalize="none"
             style={styles.authInput}
@@ -1447,7 +1709,7 @@ export default function App() {
             value={authPassword}
             onChangeText={setAuthPassword}
             placeholder="Mot de passe"
-            placeholderTextColor="#7A89AF"
+            placeholderTextColor="#94A3B8"
             secureTextEntry
             style={styles.authInput}
           />
@@ -1458,7 +1720,7 @@ export default function App() {
             disabled={authLoading}
           >
             {authLoading ? (
-              <ActivityIndicator size="small" color="#0B1020" />
+              <ActivityIndicator size="small" color="#FFFFFF" />
             ) : (
               <Text style={styles.checkoutButtonText}>
                 {authMode === "signin" ? "Se connecter" : "Creer un compte"}
@@ -1473,6 +1735,9 @@ export default function App() {
           <Text style={styles.authFootnote}>
             Client: acces direct. Admin et Livreur: validation Super Admin obligatoire.
           </Text>
+          <Text style={styles.authFootnote}>
+            Compte Super Admin de test: superadmin@livraisonpro.app / SuperAdmin123!
+          </Text>
         </View>
       </LinearGradient>
     </SafeAreaView>
@@ -1484,7 +1749,7 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
       <View style={styles.root}>
         {errorMessage ? (
           <View style={styles.errorBanner}>
@@ -1512,7 +1777,7 @@ export default function App() {
                 <MaterialCommunityIcons
                   name={tab.icon}
                   size={20}
-                  color={isActive ? "#22D3EE" : "#7A89AF"}
+                  color={isActive ? "#00A082" : "#94A3B8"}
                 />
                 <Text style={[styles.tabLabel, isActive ? styles.tabLabelActive : null]}>
                   {tab.label}
@@ -1529,7 +1794,7 @@ export default function App() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#070B17",
+    backgroundColor: "#F8FAFC",
   },
   root: {
     flex: 1,
@@ -1546,20 +1811,20 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   authTitle: {
-    color: "#F8FAFF",
+    color: "#0F172A",
     fontSize: 30,
     fontWeight: "800",
   },
   authSubtitle: {
-    color: "#AFC0E5",
+    color: "#475569",
     marginTop: 8,
     lineHeight: 20,
   },
   authCard: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#27375D",
-    backgroundColor: "#0E162B",
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
     padding: 14,
   },
   authModeRow: {
@@ -1571,21 +1836,21 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#2C3E69",
-    backgroundColor: "#101B34",
+    borderColor: "#CBD5E1",
+    backgroundColor: "#F8FAFC",
     paddingVertical: 8,
     alignItems: "center",
   },
   authModeChipActive: {
-    borderColor: "#22D3EE",
-    backgroundColor: "#0D2738",
+    borderColor: "#00A082",
+    backgroundColor: "#E6FFFA",
   },
   authModeText: {
-    color: "#9FB1D8",
+    color: "#475569",
     fontWeight: "600",
   },
   authModeTextActive: {
-    color: "#22D3EE",
+    color: "#00796B",
   },
   authRoleRow: {
     flexDirection: "row",
@@ -1596,34 +1861,35 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#334876",
+    borderColor: "#CBD5E1",
     paddingVertical: 8,
     alignItems: "center",
+    backgroundColor: "#FFFFFF",
   },
   authRoleChipActive: {
-    borderColor: "#22D3EE",
-    backgroundColor: "#0D2738",
+    borderColor: "#00A082",
+    backgroundColor: "#E6FFFA",
   },
   authRoleText: {
-    color: "#AFBEDF",
+    color: "#475569",
     fontSize: 12,
     fontWeight: "700",
   },
   authRoleTextActive: {
-    color: "#22D3EE",
+    color: "#00796B",
   },
   authInput: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#2A3B65",
-    backgroundColor: "#101B34",
-    color: "#F1F5FF",
+    borderColor: "#CBD5E1",
+    backgroundColor: "#FFFFFF",
+    color: "#111827",
     paddingHorizontal: 10,
     paddingVertical: 10,
     marginBottom: 10,
   },
   authFootnote: {
-    color: "#9FB1D8",
+    color: "#64748B",
     marginTop: 8,
     fontSize: 12,
     lineHeight: 17,
@@ -1639,18 +1905,18 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   heroTitle: {
-    color: "#F8FAFF",
+    color: "#0F172A",
     fontSize: 20,
     fontWeight: "700",
   },
   heroSubtitle: {
-    color: "#C5D4F5",
+    color: "#334155",
     marginTop: 6,
   },
   searchBox: {
-    backgroundColor: "#0F172C",
+    backgroundColor: "#FFFFFF",
     borderRadius: 14,
-    borderColor: "#1F2B49",
+    borderColor: "#E2E8F0",
     borderWidth: 1,
     flexDirection: "row",
     alignItems: "center",
@@ -1659,7 +1925,7 @@ const styles = StyleSheet.create({
     height: 46,
   },
   searchInput: {
-    color: "#E6EDFF",
+    color: "#111827",
     flex: 1,
     marginLeft: 8,
     fontSize: 14,
@@ -1670,39 +1936,39 @@ const styles = StyleSheet.create({
   },
   categoryChip: {
     borderRadius: 999,
-    borderColor: "#2B3758",
+    borderColor: "#CBD5E1",
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingVertical: 8,
-    backgroundColor: "#0E162B",
+    backgroundColor: "#FFFFFF",
   },
   categoryChipActive: {
-    backgroundColor: "#22D3EE",
-    borderColor: "#22D3EE",
+    backgroundColor: "#00A082",
+    borderColor: "#00A082",
   },
   categoryChipText: {
-    color: "#B9C7E8",
+    color: "#334155",
     fontSize: 13,
     fontWeight: "500",
   },
   categoryChipTextActive: {
-    color: "#0B1020",
+    color: "#FFFFFF",
   },
   sectionTitle: {
-    color: "#F8FAFF",
+    color: "#0F172A",
     fontSize: 20,
     fontWeight: "700",
     marginBottom: 10,
   },
   sectionSubtitle: {
-    color: "#C7D5F6",
+    color: "#334155",
     marginBottom: 8,
     marginTop: 4,
     fontSize: 15,
     fontWeight: "600",
   },
   supportingText: {
-    color: "#95A7CF",
+    color: "#64748B",
     marginBottom: 12,
   },
   centeredState: {
@@ -1712,13 +1978,13 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   centeredStateText: {
-    color: "#B8C8EB",
+    color: "#64748B",
   },
   storeCard: {
     borderRadius: 16,
     overflow: "hidden",
-    backgroundColor: "#0F172C",
-    borderColor: "#1D2948",
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E2E8F0",
     borderWidth: 1,
     marginBottom: 12,
   },
@@ -1730,24 +1996,24 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   storeCardTitle: {
-    color: "#F8FAFF",
+    color: "#111827",
     fontSize: 16,
     fontWeight: "700",
     marginBottom: 4,
   },
   storeCardDescription: {
-    color: "#9FB0D8",
+    color: "#64748B",
     lineHeight: 18,
   },
   storeCardMeta: {
-    color: "#C6D5F6",
+    color: "#475569",
     marginTop: 8,
     fontSize: 12,
   },
   productCard: {
     flexDirection: "row",
-    backgroundColor: "#0F172C",
-    borderColor: "#1D2948",
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E2E8F0",
     borderWidth: 1,
     borderRadius: 14,
     marginBottom: 10,
@@ -1769,24 +2035,30 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   productName: {
-    color: "#F8FAFF",
+    color: "#111827",
     fontSize: 14,
     fontWeight: "600",
   },
   productDescription: {
-    color: "#A6B8E2",
+    color: "#64748B",
     fontSize: 12,
     lineHeight: 17,
   },
+  productMeta: {
+    color: "#64748B",
+    fontSize: 12,
+    marginTop: 4,
+    marginBottom: 6,
+  },
   productPrice: {
-    color: "#22D3EE",
+    color: "#00A082",
     fontWeight: "700",
   },
   addButton: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: "#22D3EE",
+    backgroundColor: "#00A082",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1795,8 +2067,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#243255",
-    backgroundColor: "#0E162B",
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
     padding: 10,
     marginBottom: 10,
   },
@@ -1810,12 +2082,12 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   cartItemName: {
-    color: "#F8FAFF",
+    color: "#111827",
     fontWeight: "600",
     marginBottom: 4,
   },
   cartItemPrice: {
-    color: "#22D3EE",
+    color: "#00A082",
     fontWeight: "700",
   },
   quantityControls: {
@@ -1827,12 +2099,12 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: "#1E2A49",
+    backgroundColor: "#F1F5F9",
     alignItems: "center",
     justifyContent: "center",
   },
   quantityValue: {
-    color: "#E6EDFF",
+    color: "#111827",
     minWidth: 18,
     textAlign: "center",
     fontWeight: "700",
@@ -1840,57 +2112,57 @@ const styles = StyleSheet.create({
   addressCard: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#25345A",
-    backgroundColor: "#0E162B",
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
     padding: 12,
     marginBottom: 10,
   },
   addressTitle: {
-    color: "#D8E4FF",
+    color: "#111827",
     fontWeight: "600",
     marginBottom: 8,
   },
   addressInput: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#2A3B65",
-    backgroundColor: "#101B34",
-    color: "#F1F5FF",
+    borderColor: "#CBD5E1",
+    backgroundColor: "#FFFFFF",
+    color: "#111827",
     paddingHorizontal: 10,
     paddingVertical: 10,
   },
   pricingCard: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#25345A",
-    backgroundColor: "#0E162B",
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
     padding: 12,
     marginBottom: 12,
     gap: 8,
   },
   pricingLabel: {
-    color: "#AFC0E5",
+    color: "#64748B",
   },
   pricingValue: {
-    color: "#E7EEFF",
+    color: "#111827",
   },
   pricingTotalLabel: {
-    color: "#F8FAFF",
+    color: "#111827",
     fontWeight: "700",
     fontSize: 16,
   },
   pricingTotalValue: {
-    color: "#22D3EE",
+    color: "#00A082",
     fontWeight: "700",
     fontSize: 16,
   },
   separator: {
     height: 1,
-    backgroundColor: "#25345A",
+    backgroundColor: "#E2E8F0",
   },
   checkoutButton: {
     borderRadius: 14,
-    backgroundColor: "#22D3EE",
+    backgroundColor: "#00A082",
     minHeight: 48,
     alignItems: "center",
     justifyContent: "center",
@@ -1902,20 +2174,20 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   checkoutButtonText: {
-    color: "#0B1020",
+    color: "#FFFFFF",
     fontWeight: "700",
     fontSize: 15,
   },
   secondaryButton: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#334876",
+    borderColor: "#00A082",
     alignItems: "center",
     paddingVertical: 12,
     marginBottom: 8,
   },
   secondaryButtonText: {
-    color: "#C7D8FF",
+    color: "#00796B",
     fontWeight: "700",
   },
   trackingHero: {
@@ -1924,33 +2196,33 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   trackingStatus: {
-    color: "#F8FAFF",
+    color: "#0F172A",
     fontSize: 18,
     fontWeight: "700",
   },
   trackingEta: {
-    color: "#C5D4F6",
+    color: "#475569",
     marginTop: 6,
   },
   trackingOrder: {
-    color: "#9AB1DE",
+    color: "#64748B",
     marginTop: 2,
   },
   mapCard: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#26355B",
-    backgroundColor: "#0E162B",
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
     padding: 12,
     marginBottom: 10,
     gap: 6,
   },
   mapCardTitle: {
-    color: "#D7E4FF",
+    color: "#111827",
     fontWeight: "600",
   },
   mapCoordinate: {
-    color: "#AFC0E5",
+    color: "#64748B",
   },
   timelineItem: {
     flexDirection: "row",
@@ -1963,14 +2235,14 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 5,
     marginTop: 6,
-    backgroundColor: "#22D3EE",
+    backgroundColor: "#00A082",
   },
   timelineLabel: {
-    color: "#E5EEFF",
+    color: "#111827",
     fontWeight: "600",
   },
   timelineTimestamp: {
-    color: "#95A8D1",
+    color: "#64748B",
     marginTop: 2,
   },
   cancelButton: {
@@ -1983,28 +2255,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   cancelButtonText: {
-    color: "#FCA5A5",
+    color: "#B91C1C",
     fontWeight: "700",
   },
   emptyBox: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#243255",
-    backgroundColor: "#0E162B",
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
     padding: 16,
     alignItems: "center",
     gap: 8,
   },
   emptyBoxText: {
-    color: "#AFC0E5",
+    color: "#64748B",
     textAlign: "center",
     lineHeight: 20,
   },
   profileCard: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#27375D",
-    backgroundColor: "#0E162B",
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
     padding: 14,
     flexDirection: "row",
     alignItems: "center",
@@ -2015,17 +2287,17 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: "#22D3EE",
+    backgroundColor: "#00A082",
     alignItems: "center",
     justifyContent: "center",
   },
   profileName: {
-    color: "#F8FAFF",
+    color: "#111827",
     fontWeight: "700",
     fontSize: 16,
   },
   profileHint: {
-    color: "#9EB0D8",
+    color: "#64748B",
     marginTop: 2,
   },
   statsGrid: {
@@ -2037,19 +2309,19 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#27375D",
-    backgroundColor: "#0E162B",
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
     padding: 14,
     alignItems: "center",
   },
   statValue: {
-    color: "#22D3EE",
+    color: "#00A082",
     fontSize: 22,
     fontWeight: "700",
     textAlign: "center",
   },
   statLabel: {
-    color: "#9EB0D8",
+    color: "#64748B",
     marginTop: 4,
     textAlign: "center",
     fontSize: 12,
@@ -2057,19 +2329,19 @@ const styles = StyleSheet.create({
   infoCard: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#27375D",
-    backgroundColor: "#0E162B",
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
     padding: 14,
     marginBottom: 10,
     gap: 5,
   },
   infoCardTitle: {
-    color: "#D8E4FF",
+    color: "#111827",
     fontWeight: "700",
     marginBottom: 4,
   },
   infoCardText: {
-    color: "#9FB1D8",
+    color: "#475569",
   },
   rowBetween: {
     flexDirection: "row",
@@ -2086,14 +2358,14 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "#1D2A4A",
+    backgroundColor: "#F1F5F9",
     alignItems: "center",
     justifyContent: "center",
   },
   smallAction: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#22D3EE",
+    borderColor: "#00A082",
     paddingVertical: 8,
     paddingHorizontal: 12,
   },
@@ -2101,7 +2373,7 @@ const styles = StyleSheet.create({
     borderColor: "#EF4444",
   },
   smallActionText: {
-    color: "#D8E4FF",
+    color: "#00796B",
     fontWeight: "600",
     fontSize: 12,
   },
@@ -2110,8 +2382,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#7F1D1D",
-    backgroundColor: "#3F1118",
+    borderColor: "#FCA5A5",
+    backgroundColor: "#FEF2F2",
     paddingHorizontal: 10,
     paddingVertical: 8,
     flexDirection: "row",
@@ -2119,7 +2391,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   errorBannerText: {
-    color: "#FECACA",
+    color: "#B91C1C",
     flex: 1,
   },
   infoBanner: {
@@ -2127,8 +2399,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#0C4A6E",
-    backgroundColor: "#082F49",
+    borderColor: "#6EE7B7",
+    backgroundColor: "#ECFDF5",
     paddingHorizontal: 10,
     paddingVertical: 8,
     flexDirection: "row",
@@ -2136,7 +2408,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   infoBannerText: {
-    color: "#BAE6FD",
+    color: "#065F46",
     flex: 1,
   },
   tabBar: {
@@ -2144,8 +2416,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-around",
     borderTopWidth: 1,
-    borderTopColor: "#1B2743",
-    backgroundColor: "#090F1D",
+    borderTopColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
     paddingTop: 8,
     paddingBottom: 10,
     paddingHorizontal: 8,
@@ -2156,11 +2428,11 @@ const styles = StyleSheet.create({
     minWidth: 65,
   },
   tabLabel: {
-    color: "#7A89AF",
+    color: "#64748B",
     fontSize: 11,
   },
   tabLabelActive: {
-    color: "#22D3EE",
+    color: "#00A082",
     fontWeight: "600",
   },
 });
