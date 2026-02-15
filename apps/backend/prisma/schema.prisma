@@ -9,6 +9,7 @@ datasource db {
 enum OrderStatus {
   PENDING
   ACCEPTED
+  REFUSED
   PREPARING
   PICKED_UP
   ON_THE_WAY
@@ -17,9 +18,17 @@ enum OrderStatus {
 }
 
 enum UserRole {
-  CUSTOMER
-  COURIER
+  SUPER_ADMIN
   ADMIN
+  CLIENT
+  LIVREUR
+}
+
+enum UserAccessStatus {
+  ACTIVE
+  PENDING_APPROVAL
+  REJECTED
+  SUSPENDED
 }
 
 enum PaymentStatus {
@@ -30,21 +39,26 @@ enum PaymentStatus {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  name          String
-  email         String?   @unique
-  passwordHash  String?
-  role          UserRole  @default(CUSTOMER)
-  phone         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  orders        Order[]
-  courierProfile Courier?
+  id                 String           @id @default(cuid())
+  name               String
+  email              String?          @unique
+  passwordHash       String?
+  role               UserRole         @default(CLIENT)
+  accessStatus       UserAccessStatus @default(ACTIVE)
+  requestedStoreName String?
+  requestedVehicle   String?
+  phone              String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  orders             Order[]
+  managedStore       Store?           @relation("StoreAdmin")
+  courierProfile     Courier?
 }
 
 model Courier {
   id          String   @id @default(cuid())
   userId      String?  @unique
+  storeId     String?
   name        String
   rating      Float    @default(4.8)
   vehicle     String
@@ -53,14 +67,17 @@ model Courier {
   isAvailable Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  user        User?    @relation(fields: [userId], references: [id])
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  store       Store?   @relation(fields: [storeId], references: [id], onDelete: SetNull)
   orders      Order[]
 
   @@index([userId])
+  @@index([storeId])
 }
 
 model Store {
   id          String   @id @default(cuid())
+  adminUserId String?  @unique
   name        String
   category    String
   description String
@@ -71,8 +88,10 @@ model Store {
   lat         Float
   lng         Float
   createdAt   DateTime @default(now())
+  adminUser   User?    @relation("StoreAdmin", fields: [adminUserId], references: [id], onDelete: SetNull)
   products    Product[]
   orders      Order[]
+  couriers    Courier[]
 }
 
 model Product {
@@ -99,6 +118,9 @@ model Order {
   paymentStatus   PaymentStatus @default(PENDING)
   paymentIntentId String?
   paidAt          DateTime?
+  acceptedAt      DateTime?
+  refusedAt       DateTime?
+  adminNote       String?
   subtotal        Float
   deliveryFee     Float
   total           Float
@@ -109,7 +131,7 @@ model Order {
   updatedAt       DateTime      @updatedAt
   user            User          @relation(fields: [userId], references: [id])
   store           Store         @relation(fields: [storeId], references: [id])
-  courier         Courier?      @relation(fields: [courierId], references: [id])
+  courier         Courier?      @relation(fields: [courierId], references: [id], onDelete: SetNull)
   items           OrderItem[]
   events          OrderStatusEvent[]
 

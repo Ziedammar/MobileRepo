@@ -2,12 +2,12 @@
 
 API Fastify + Prisma (SQLite) avec :
 
-- auth JWT (client, coursier, admin),
+- auth JWT (Super Admin, Admin, Client, Livreur),
 - roles et routes protegees,
 - catalogue stores/produits,
 - commandes et progression de statut,
 - paiement mock (ready pour integration provider),
-- websocket temps reel pour tracking.
+- websocket temps reel pour tracking et dashboard admin.
 
 ## Demarrage
 
@@ -24,9 +24,10 @@ Serveur par defaut : `http://localhost:3333`.
 
 ## Comptes seed
 
-- Admin : `admin@livraisonpro.app` / `Admin123!`
+- Super Admin : `superadmin@livraisonpro.app` / `SuperAdmin123!`
+- Admin restaurant : `admin.*@livraisonpro.app` / `Admin123!`
 - Client : `client@livraisonpro.app` / `Client123!`
-- Coursier : `<prenom>.courier@livraisonpro.app` / `Courier123!`
+- Livreur : `*.livreur@livraisonpro.app` / `Livreur123!`
 
 ## Endpoints principaux (V2)
 
@@ -44,7 +45,18 @@ Serveur par defaut : `http://localhost:3333`.
 - `GET /orders/:orderId/tracking`
 - `POST /orders/:orderId/cancel`
 - `POST /payments/webhook`
+- `GET /admin/dashboard`
 - `GET /admin/orders` (admin)
-- `GET /courier/orders/me` (coursier)
-- `PATCH /courier/orders/:orderId/status` (coursier)
+- `PATCH /admin/orders/:orderId/decision` (admin accepte/refuse)
+- `GET /admin/products`
+- `POST /admin/products`
+- `GET /admin/couriers`
+- `POST /admin/couriers/associate`
+- `GET /super-admin/dashboard`
+- `GET /super-admin/pending-users`
+- `PATCH /super-admin/users/:userId/approval`
+- `GET /super-admin/stores`
+- `GET /livreur/orders/me` (livreur)
+- `PATCH /livreur/orders/:orderId/status` (livreur)
 - `WS /ws/orders/:orderId?token=<JWT>`
+- `WS /ws/admin/dashboard?token=<JWT>`

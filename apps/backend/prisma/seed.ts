@@ -1,18 +1,23 @@
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import { PrismaClient, UserRole } from "@prisma/client";
+import { PrismaClient, UserAccessStatus, UserRole } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
 const databaseUrl = process.env.DATABASE_URL ?? "file:./prisma/dev.db";
 const adapter = new PrismaBetterSqlite3({ url: databaseUrl });
 const prisma = new PrismaClient({ adapter });
 
+const superAdminPassword =
+  process.env.SEED_SUPER_ADMIN_PASSWORD ?? "SuperAdmin123!";
 const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? "Admin123!";
-const customerPassword = process.env.SEED_CUSTOMER_PASSWORD ?? "Client123!";
-const courierPassword = process.env.SEED_COURIER_PASSWORD ?? "Courier123!";
+const clientPassword = process.env.SEED_CUSTOMER_PASSWORD ?? "Client123!";
+const livreurPassword = process.env.SEED_LIVREUR_PASSWORD ?? "Livreur123!";
 
 const storesSeed = [
   {
+    key: "burger-studio",
     name: "Burger Studio",
+    adminName: "Admin Burger Studio",
+    adminEmail: "admin.burger@livraisonpro.app",
     category: "Burgers",
     description: "Smash burgers premium, sauces maison et sides croustillants.",
     rating: 4.8,
@@ -50,7 +55,10 @@ const storesSeed = [
     ],
   },
   {
+    key: "sushi-lab",
     name: "Sushi Lab",
+    adminName: "Admin Sushi Lab",
+    adminEmail: "admin.sushi@livraisonpro.app",
     category: "Sushi",
     description: "Maki signatures, bowls et sashimi ultra frais.",
     rating: 4.7,
@@ -88,7 +96,10 @@ const storesSeed = [
     ],
   },
   {
+    key: "daily-market",
     name: "Daily Market",
+    adminName: "Admin Daily Market",
+    adminEmail: "admin.market@livraisonpro.app",
     category: "Courses",
     description: "Courses express, fruits frais et essentials maison.",
     rating: 4.6,
@@ -125,7 +136,37 @@ const storesSeed = [
       },
     ],
   },
-];
+] as const;
+
+const livreursSeed = [
+  {
+    name: "Amir",
+    email: "amir.livreur@livraisonpro.app",
+    rating: 4.9,
+    vehicle: "Scooter",
+    storeKey: "burger-studio",
+    lat: 36.809,
+    lng: 10.179,
+  },
+  {
+    name: "Nour",
+    email: "nour.livreur@livraisonpro.app",
+    rating: 4.8,
+    vehicle: "Velo",
+    storeKey: "sushi-lab",
+    lat: 36.802,
+    lng: 10.168,
+  },
+  {
+    name: "Youssef",
+    email: "youssef.livreur@livraisonpro.app",
+    rating: 4.7,
+    vehicle: "Moto",
+    storeKey: "daily-market",
+    lat: 36.813,
+    lng: 10.173,
+  },
+] as const;
 
 async function main() {
   await prisma.orderStatusEvent.deleteMany();
@@ -136,19 +177,21 @@ async function main() {
   await prisma.courier.deleteMany();
   await prisma.user.deleteMany();
 
-  const [adminHash, customerHash, courierHash] = await Promise.all([
+  const [superAdminHash, adminHash, clientHash, livreurHash] = await Promise.all([
+    bcrypt.hash(superAdminPassword, 12),
     bcrypt.hash(adminPassword, 12),
-    bcrypt.hash(customerPassword, 12),
-    bcrypt.hash(courierPassword, 12),
+    bcrypt.hash(clientPassword, 12),
+    bcrypt.hash(livreurPassword, 12),
   ]);
 
   await prisma.user.create({
     data: {
-      name: "Admin Pro",
-      email: "admin@livraisonpro.app",
-      passwordHash: adminHash,
-      role: UserRole.ADMIN,
-      phone: "+216 99 999 999",
+      name: "Super Admin Global",
+      email: "superadmin@livraisonpro.app",
+      passwordHash: superAdminHash,
+      role: UserRole.SUPER_ADMIN,
+      accessStatus: UserAccessStatus.ACTIVE,
+      phone: "+216 99 900 900",
     },
   });
 
@@ -156,76 +199,30 @@ async function main() {
     data: {
       name: "Client Demo",
       email: "client@livraisonpro.app",
-      passwordHash: customerHash,
-      role: UserRole.CUSTOMER,
+      passwordHash: clientHash,
+      role: UserRole.CLIENT,
+      accessStatus: UserAccessStatus.ACTIVE,
       phone: "+216 99 000 000",
     },
   });
 
-  const courierProfiles = [
-    {
-      name: "Amir",
-      email: "amir.courier@livraisonpro.app",
-      rating: 4.9,
-      vehicle: "Scooter",
-      lat: 36.809,
-      lng: 10.179,
-    },
-    {
-      name: "Nour",
-      email: "nour.courier@livraisonpro.app",
-      rating: 4.8,
-      vehicle: "Velo",
-      lat: 36.802,
-      lng: 10.168,
-    },
-    {
-      name: "Youssef",
-      email: "youssef.courier@livraisonpro.app",
-      rating: 4.7,
-      vehicle: "Moto",
-      lat: 36.813,
-      lng: 10.173,
-    },
-  ];
-
-  for (const courier of courierProfiles) {
-    const user = await prisma.user.create({
-      data: {
-        name: courier.name,
-        email: courier.email,
-        passwordHash: courierHash,
-        role: UserRole.COURIER,
-      },
-    });
-
-    await prisma.courier.create({
-      data: {
-        userId: user.id,
-        name: courier.name,
-        rating: courier.rating,
-        vehicle: courier.vehicle,
-        lat: courier.lat,
-        lng: courier.lng,
-        isAvailable: true,
-      },
-    });
-  }
-
-  await prisma.courier.create({
-    data: {
-      name: "Livreur Offline",
-      rating: 4.6,
-      vehicle: "Scooter",
-      lat: 36.801,
-      lng: 10.165,
-      isAvailable: false,
-    },
-  });
+  const storesByKey = new Map<string, { id: string; lat: number; lng: number }>();
 
   for (const storeSeed of storesSeed) {
+    const adminUser = await prisma.user.create({
+      data: {
+        name: storeSeed.adminName,
+        email: storeSeed.adminEmail,
+        passwordHash: adminHash,
+        role: UserRole.ADMIN,
+        accessStatus: UserAccessStatus.ACTIVE,
+        requestedStoreName: storeSeed.name,
+      },
+    });
+
     const store = await prisma.store.create({
       data: {
+        adminUserId: adminUser.id,
         name: storeSeed.name,
         category: storeSeed.category,
         description: storeSeed.description,
@@ -248,12 +245,72 @@ async function main() {
         isPopular: product.isPopular,
       })),
     });
+
+    storesByKey.set(storeSeed.key, {
+      id: store.id,
+      lat: storeSeed.lat,
+      lng: storeSeed.lng,
+    });
   }
 
-  console.log("Comptes seed:");
-  console.log("Admin: admin@livraisonpro.app /", adminPassword);
-  console.log("Client: client@livraisonpro.app /", customerPassword);
-  console.log("Courier: <prenom>.courier@livraisonpro.app /", courierPassword);
+  for (const livreurSeed of livreursSeed) {
+    const store = storesByKey.get(livreurSeed.storeKey);
+    if (!store) {
+      throw new Error(`Store introuvable: ${livreurSeed.storeKey}`);
+    }
+
+    const livreurUser = await prisma.user.create({
+      data: {
+        name: livreurSeed.name,
+        email: livreurSeed.email,
+        passwordHash: livreurHash,
+        role: UserRole.LIVREUR,
+        accessStatus: UserAccessStatus.ACTIVE,
+        requestedVehicle: livreurSeed.vehicle,
+      },
+    });
+
+    await prisma.courier.create({
+      data: {
+        userId: livreurUser.id,
+        storeId: store.id,
+        name: livreurSeed.name,
+        rating: livreurSeed.rating,
+        vehicle: livreurSeed.vehicle,
+        lat: livreurSeed.lat,
+        lng: livreurSeed.lng,
+        isAvailable: true,
+      },
+    });
+  }
+
+  await prisma.user.create({
+    data: {
+      name: "Candidat Admin Pasta House",
+      email: "request.admin@livraisonpro.app",
+      passwordHash: adminHash,
+      role: UserRole.ADMIN,
+      accessStatus: UserAccessStatus.PENDING_APPROVAL,
+      requestedStoreName: "Pasta House",
+    },
+  });
+
+  await prisma.user.create({
+    data: {
+      name: "Candidat Livreur Sami",
+      email: "request.livreur@livraisonpro.app",
+      passwordHash: livreurHash,
+      role: UserRole.LIVREUR,
+      accessStatus: UserAccessStatus.PENDING_APPROVAL,
+      requestedVehicle: "Moto",
+    },
+  });
+
+  console.log("Comptes seed V2 Pro:");
+  console.log("Super Admin: superadmin@livraisonpro.app /", superAdminPassword);
+  console.log("Admins restaurants: admin.*@livraisonpro.app /", adminPassword);
+  console.log("Client: client@livraisonpro.app /", clientPassword);
+  console.log("Livreurs: *.livreur@livraisonpro.app /", livreurPassword);
 }
 
 main()

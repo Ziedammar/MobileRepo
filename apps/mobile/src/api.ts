@@ -1,14 +1,21 @@
 import { Platform } from "react-native";
 
 import type {
+  AdminDashboardResponse,
+  AdminOrder,
   AuthResponse,
+  Courier,
   CreateOrderPayload,
   CreateOrderResponse,
   GuestAuthResponse,
   HomeResponse,
+  LivreurOrdersResponse,
+  MeResponse,
   OrderDetails,
   PaymentResponse,
+  Product,
   StoreDetails,
+  SuperAdminDashboard,
   TrackingResponse,
 } from "./types";
 
@@ -28,6 +35,9 @@ export const setAuthToken = (token: string | null): void => {
 
 export const getOrderWsUrl = (orderId: string, token: string): string =>
   `${WS_BASE_URL}/ws/orders/${orderId}?token=${encodeURIComponent(token)}`;
+
+export const getAdminDashboardWsUrl = (token: string): string =>
+  `${WS_BASE_URL}/ws/admin/dashboard?token=${encodeURIComponent(token)}`;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers ?? {});
@@ -71,6 +81,9 @@ export const api = {
     email: string;
     password: string;
     phone?: string;
+    role: "CLIENT" | "ADMIN" | "LIVREUR";
+    requestedStoreName?: string;
+    requestedVehicle?: string;
   }) =>
     request<AuthResponse>("/auth/register", {
       method: "POST",
@@ -81,30 +94,23 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  me: () =>
-    request<{
-      user: {
-        id: string;
-        name: string;
-        email: string | null;
-        phone: string | null;
-        role: "CUSTOMER" | "COURIER" | "ADMIN";
-      };
-      courierProfile?: {
-        id: string;
-        name: string;
-        vehicle: string;
-      } | null;
-    }>("/auth/me"),
+  me: () => request<MeResponse>("/auth/me"),
+
   createOrder: (payload: CreateOrderPayload) =>
     request<CreateOrderResponse>("/orders", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  payOrder: (orderId: string, payload?: { provider?: "CARD"; cardLast4?: string }) =>
+  payOrder: (
+    orderId: string,
+    payload?: {
+      provider?: "CARD" | "APPLE_PAY" | "GOOGLE_PAY";
+      cardLast4?: string;
+    },
+  ) =>
     request<PaymentResponse>(`/orders/${orderId}/pay`, {
       method: "POST",
-      body: JSON.stringify(payload ?? { provider: "CARD" }),
+      body: JSON.stringify(payload ?? { provider: "CARD", cardLast4: "4242" }),
     }),
   getOrder: (orderId: string) => request<OrderDetails>(`/orders/${orderId}`),
   getTracking: (orderId: string) =>
@@ -113,5 +119,113 @@ export const api = {
     request<{ id: string; status: string; statusLabel: string }>(
       `/orders/${orderId}/cancel`,
       { method: "POST" },
+    ),
+
+  getAdminDashboard: () => request<AdminDashboardResponse>("/admin/dashboard"),
+  getAdminOrders: () => request<AdminOrder[]>("/admin/orders"),
+  adminDecideOrder: (
+    orderId: string,
+    payload: { decision: "accept" | "refuse"; courierId?: string; note?: string },
+  ) =>
+    request<{
+      id: string;
+      status: string;
+      statusLabel: string;
+      courierId?: string | null;
+    }>(`/admin/orders/${orderId}/decision`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  getAdminProducts: () => request<Product[]>("/admin/products"),
+  createAdminProduct: (payload: {
+    name: string;
+    description: string;
+    price: number;
+    imageUrl: string;
+    isPopular?: boolean;
+  }) =>
+    request<Product>("/admin/products", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateAdminProduct: (
+    productId: string,
+    payload: Partial<{
+      name: string;
+      description: string;
+      price: number;
+      imageUrl: string;
+      isPopular: boolean;
+    }>,
+  ) =>
+    request<Product>(`/admin/products/${productId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteAdminProduct: (productId: string) =>
+    request<void>(`/admin/products/${productId}`, {
+      method: "DELETE",
+    }),
+  getAdminCouriers: () => request<Courier[]>("/admin/couriers"),
+  associateAdminCourier: (payload: { livreurUserId: string; vehicle?: string }) =>
+    request<Courier>("/admin/couriers/associate", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  setCourierAvailability: (courierId: string, isAvailable: boolean) =>
+    request<Courier>(`/admin/couriers/${courierId}/availability`, {
+      method: "PATCH",
+      body: JSON.stringify({ isAvailable }),
+    }),
+
+  getSuperAdminDashboard: () =>
+    request<SuperAdminDashboard>("/super-admin/dashboard"),
+  getSuperAdminPendingUsers: () =>
+    request<
+      Array<{
+        id: string;
+        name: string;
+        email: string | null;
+        role: "ADMIN" | "LIVREUR";
+        accessStatus: "PENDING_APPROVAL";
+        requestedStoreName: string | null;
+        requestedVehicle: string | null;
+      }>
+    >("/super-admin/pending-users"),
+  reviewPendingUser: (
+    userId: string,
+    payload: {
+      action: "approve" | "reject";
+      storeId?: string;
+      storeName?: string;
+      vehicle?: string;
+    },
+  ) =>
+    request(`/super-admin/users/${userId}/approval`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  getSuperAdminStores: () =>
+    request<
+      Array<{
+        id: string;
+        name: string;
+        category: string;
+        adminUser: { id: string; name: string; email: string | null } | null;
+        _count: { products: number; orders: number; couriers: number };
+      }>
+    >("/super-admin/stores"),
+
+  getLivreurOrders: () => request<LivreurOrdersResponse>("/livreur/orders/me"),
+  updateLivreurOrderStatus: (
+    orderId: string,
+    status: "PICKED_UP" | "ON_THE_WAY" | "DELIVERED",
+  ) =>
+    request<{ id: string; status: string; statusLabel: string }>(
+      `/livreur/orders/${orderId}/status`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      },
     ),
 };

@@ -1,13 +1,10 @@
-export type Product = {
-  id: string;
-  name: string;
-  description: string;
-  price: number;
-  imageUrl: string;
-  isPopular?: boolean;
-};
+export type UserRole = "SUPER_ADMIN" | "ADMIN" | "CLIENT" | "LIVREUR";
 
-export type UserRole = "CUSTOMER" | "COURIER" | "ADMIN";
+export type UserAccessStatus =
+  | "ACTIVE"
+  | "PENDING_APPROVAL"
+  | "REJECTED"
+  | "SUSPENDED";
 
 export type AuthUser = {
   id: string;
@@ -15,11 +12,26 @@ export type AuthUser = {
   email: string | null;
   phone: string | null;
   role: UserRole;
+  accessStatus: UserAccessStatus;
+  requestedStoreName: string | null;
+  requestedVehicle: string | null;
 };
 
 export type AuthResponse = {
-  token: string;
+  token: string | null;
+  requiresApproval: boolean;
+  message: string;
   user: AuthUser;
+};
+
+export type Product = {
+  id: string;
+  storeId?: string;
+  name: string;
+  description: string;
+  price: number;
+  imageUrl: string;
+  isPopular?: boolean;
 };
 
 export type StoreSummary = {
@@ -31,6 +43,7 @@ export type StoreSummary = {
   etaMinutes: number;
   deliveryFee: number;
   imageUrl: string;
+  adminName?: string | null;
   highlightProducts?: Array<{
     id: string;
     name: string;
@@ -69,9 +82,6 @@ export type StoreDetails = {
 export type GuestAuthResponse = AuthResponse;
 
 export type CreateOrderPayload = {
-  userId?: string;
-  customerName?: string;
-  customerPhone?: string;
   storeId: string;
   addressText: string;
   addressLat: number;
@@ -122,8 +132,16 @@ export type OrderDetails = {
   paymentStatus: string;
   paymentIntentId: string | null;
   paidAt: string | null;
+  acceptedAt: string | null;
+  refusedAt: string | null;
+  adminNote: string | null;
   createdAt: string;
   etaMinutes: number;
+  user: {
+    id: string;
+    name: string;
+    email: string | null;
+  };
   store: {
     id: string;
     name: string;
@@ -188,4 +206,113 @@ export type TrackingResponse = {
     lat: number;
     lng: number;
   };
+};
+
+export type AdminDashboardResponse = {
+  store: {
+    id: string;
+    name: string;
+    category: string;
+  };
+  stats: {
+    totalOrders: number;
+    pendingOrders: number;
+    acceptedOrders: number;
+    preparingOrders: number;
+    onWayOrders: number;
+    deliveredToday: number;
+    refusedToday: number;
+    revenueToday: number;
+    productsCount: number;
+    availableCouriers: number;
+    busyCouriers: number;
+    chart: Array<{
+      label: string;
+      orders: number;
+    }>;
+  };
+};
+
+export type AdminOrder = {
+  id: string;
+  status: string;
+  paymentStatus: string;
+  total: number;
+  createdAt: string;
+  user: {
+    id: string;
+    name: string;
+    email: string | null;
+  };
+  courier: {
+    id: string;
+    name: string;
+    vehicle: string;
+    isAvailable: boolean;
+  } | null;
+};
+
+export type Courier = {
+  id: string;
+  userId?: string | null;
+  storeId?: string | null;
+  name: string;
+  rating: number;
+  vehicle: string;
+  lat: number;
+  lng: number;
+  isAvailable: boolean;
+};
+
+export type SuperAdminDashboard = {
+  usersCount: number;
+  storesCount: number;
+  pendingApprovals: number;
+  ordersToday: number;
+  deliveredToday: number;
+  usersByRole: Array<{
+    role: UserRole;
+    count: number;
+  }>;
+};
+
+export type MeResponse = {
+  user: AuthUser;
+  managedStore?: {
+    id: string;
+    name: string;
+    category: string;
+  } | null;
+  courierProfile?: {
+    id: string;
+    name: string;
+    vehicle: string;
+    isAvailable?: boolean;
+  } | null;
+};
+
+export type LivreurOrdersResponse = {
+  courier: {
+    id: string;
+    name: string;
+    vehicle: string;
+    isAvailable: boolean;
+    store: {
+      id: string;
+      name: string;
+    } | null;
+  };
+  orders: Array<{
+    id: string;
+    status: string;
+    paymentStatus: string;
+    total: number;
+    createdAt: string;
+    updatedAt: string;
+    addressText: string;
+    store: {
+      id: string;
+      name: string;
+    };
+  }>;
 };
