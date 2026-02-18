@@ -101,16 +101,46 @@ const money = (value: number): string => `${value.toFixed(2)} DT`;
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : "Une erreur inattendue est survenue";
 
+const templatePalette = {
+  primary: "#F5C518",
+  primaryDark: "#D89B00",
+  ink: "#111827",
+  muted: "#6B7280",
+  background: "#F3F4F6",
+  surface: "#FFFFFF",
+  surfaceSoft: "#FFF7D6",
+  border: "#E5E7EB",
+};
+
+const categoryIconMap: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
+  burgers: "hamburger",
+  burger: "hamburger",
+  sushi: "fish",
+  pizza: "pizza",
+  courses: "basket-outline",
+  market: "basket-outline",
+  boissons: "cup-outline",
+  cafe: "coffee-outline",
+  tacos: "food-outline",
+  dessert: "cupcake",
+  tous: "apps",
+};
+
+const categoryIconFor = (category: string): keyof typeof MaterialCommunityIcons.glyphMap => {
+  const normalized = category.trim().toLowerCase();
+  return categoryIconMap[normalized] ?? "silverware-fork-knife";
+};
+
 const internetPaperTheme = {
   ...MD3LightTheme,
   colors: {
     ...MD3LightTheme.colors,
-    primary: "#00A082",
-    secondary: "#0F766E",
-    background: "#F8FAFC",
-    surface: "#FFFFFF",
-    surfaceVariant: "#ECFDF5",
-    outline: "#CBD5E1",
+    primary: templatePalette.primary,
+    secondary: templatePalette.primaryDark,
+    background: templatePalette.background,
+    surface: templatePalette.surface,
+    surfaceVariant: templatePalette.surfaceSoft,
+    outline: templatePalette.border,
     error: "#B91C1C",
   },
 };
@@ -782,36 +812,51 @@ export default function App() {
         <View style={styles.screen}>
           <View style={styles.rowBetween}>
             <Pressable
-              style={styles.iconButton}
+              style={styles.templateIconCircle}
               onPress={() => setSelectedStore(null)}
             >
-              <MaterialCommunityIcons name="chevron-left" size={22} color="#1F2937" />
+              <MaterialCommunityIcons
+                name="chevron-left"
+                size={20}
+                color={templatePalette.ink}
+              />
             </Pressable>
-            <Text style={styles.sectionTitle}>{selectedStore.name}</Text>
+            <Text style={styles.templatePageTitle}>{selectedStore.name}</Text>
             <View style={{ width: 32 }} />
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false}>
-            <Image source={{ uri: selectedStore.imageUrl }} style={styles.storeHeroImage} />
+            <View style={styles.templateStoreHeroCard}>
+              <Image source={{ uri: selectedStore.imageUrl }} style={styles.storeHeroImage} />
+              <LinearGradient
+                colors={["transparent", "rgba(0,0,0,0.65)"]}
+                style={styles.templateStoreHeroOverlay}
+              >
+                <Text style={styles.templateStoreHeroTitle}>{selectedStore.name}</Text>
+                <Text style={styles.templateStoreHeroSubtitle}>
+                  {selectedStore.category} · ⭐ {selectedStore.rating.toFixed(1)}
+                </Text>
+              </LinearGradient>
+            </View>
             <Text style={styles.supportingText}>{selectedStore.description}</Text>
 
             {selectedStore.products.map((product) => (
-              <View key={product.id} style={styles.productCard}>
+              <View key={product.id} style={styles.templateProductRowCard}>
                 <Image source={{ uri: product.imageUrl }} style={styles.productImage} />
                 <View style={styles.productContent}>
                   <Text style={styles.productName}>{product.name}</Text>
                   <Text style={styles.productDescription}>{product.description}</Text>
-                  <Text style={styles.productMeta}>
-                    {product.category ?? "General"} · Stock: {product.stock ?? 0}
-                  </Text>
                   <View style={styles.rowBetween}>
                     <Text style={styles.productPrice}>{money(product.price)}</Text>
-                    <Pressable
-                      style={styles.addButton}
-                      onPress={() => addProductToCart(selectedStore.id, product)}
-                    >
-                      <MaterialCommunityIcons name="plus" size={16} color="#FFFFFF" />
-                    </Pressable>
+                    <View style={styles.rowActions}>
+                      <Text style={styles.templateStockText}>Stock {product.stock ?? 0}</Text>
+                      <Pressable
+                        style={styles.addButton}
+                        onPress={() => addProductToCart(selectedStore.id, product)}
+                      >
+                        <MaterialCommunityIcons name="plus" size={16} color="#111827" />
+                      </Pressable>
+                    </View>
                   </View>
                 </View>
               </View>
@@ -824,7 +869,7 @@ export default function App() {
     if (loadingHome) {
       return (
         <View style={styles.centeredState}>
-          <ActivityIndicator size="large" color="#00A082" />
+          <ActivityIndicator size="large" color={templatePalette.primaryDark} />
           <Text style={styles.centeredStateText}>Chargement...</Text>
         </View>
       );
@@ -838,44 +883,81 @@ export default function App() {
       );
     }
 
+    const heroStore = filteredStores[0] ?? home.stores[0];
+    const heroImage =
+      heroStore?.imageUrl ??
+      "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=1200&q=80";
+
     return (
       <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
-        <ThemeHeaderCard
-          icon="compass-outline"
-          title={home.hero.title}
-          subtitle={home.hero.subtitle}
-          actionLabel="Actualiser"
-          onActionPress={() => void refreshHome(true)}
-        />
+        <View style={styles.templateHeaderRow}>
+          <View>
+            <Text style={styles.templateGreeting}>Hey 👋</Text>
+            <Text style={styles.templateLocation}>Livraison a Tunis</Text>
+          </View>
+          <Pressable style={styles.templateIconCircle} onPress={() => setActiveTab("profile")}>
+            <MaterialCommunityIcons
+              name="account-outline"
+              size={20}
+              color={templatePalette.ink}
+            />
+          </Pressable>
+        </View>
 
         <View style={styles.searchBox}>
-          <MaterialCommunityIcons name="magnify" size={18} color="#64748B" />
+          <MaterialCommunityIcons name="magnify" size={18} color="#6B7280" />
           <TextInput
             value={searchValue}
             onChangeText={setSearchValue}
-            placeholder="Rechercher un restaurant"
+            placeholder="Search burger, pizza, sushi..."
             placeholderTextColor="#94A3B8"
             style={styles.searchInput}
           />
+          <Pressable style={styles.templateFilterButton} onPress={() => setSelectedCategory("Tous")}>
+            <MaterialCommunityIcons name="tune-variant" size={16} color="#111827" />
+          </Pressable>
         </View>
 
+        <Pressable style={styles.templatePromoCard} onPress={() => void refreshHome(true)}>
+          <Image source={{ uri: heroImage }} style={styles.templatePromoImage} />
+          <LinearGradient
+            colors={["rgba(0,0,0,0.1)", "rgba(0,0,0,0.72)"]}
+            style={styles.templatePromoOverlay}
+          >
+            <Text style={styles.templatePromoBadge}>OFFRE DU JOUR</Text>
+            <Text style={styles.templatePromoTitle}>Livraison express</Text>
+            <Text style={styles.templatePromoSubtitle}>
+              Jusqu'a -30% sur tes restos favoris
+            </Text>
+          </LinearGradient>
+        </Pressable>
+
+        <Text style={styles.templateSectionLabel}>Categories</Text>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.categoriesContainer}
+          contentContainerStyle={styles.templateCategoriesContainer}
         >
           {categories.map((category) => {
             const selected = category === selectedCategory;
             return (
               <Pressable
                 key={category}
-                style={[styles.categoryChip, selected ? styles.categoryChipActive : null]}
+                style={[
+                  styles.templateCategoryChip,
+                  selected ? styles.templateCategoryChipActive : null,
+                ]}
                 onPress={() => setSelectedCategory(category)}
               >
+                <MaterialCommunityIcons
+                  name={categoryIconFor(category)}
+                  size={16}
+                  color={selected ? "#111827" : "#6B7280"}
+                />
                 <Text
                   style={[
-                    styles.categoryChipText,
-                    selected ? styles.categoryChipTextActive : null,
+                    styles.templateCategoryText,
+                    selected ? styles.templateCategoryTextActive : null,
                   ]}
                 >
                   {category}
@@ -885,27 +967,45 @@ export default function App() {
           })}
         </ScrollView>
 
-        <Text style={styles.sectionSubtitle}>Restaurants</Text>
+        <Text style={styles.templateSectionLabel}>Popular restaurants</Text>
         {filteredStores.map((store) => (
           <Pressable
             key={store.id}
-            style={styles.storeCard}
+            style={styles.templateStoreRowCard}
             onPress={() => void openStore(store.id)}
           >
-            <Image source={{ uri: store.imageUrl }} style={styles.storeCardImage} />
-            <View style={styles.storeCardContent}>
-              <Text style={styles.storeCardTitle}>{store.name}</Text>
-              <Text style={styles.storeCardDescription}>{store.description}</Text>
-              <Text style={styles.storeCardMeta}>
-                ⭐ {store.rating.toFixed(1)} · {store.etaMinutes} min · 🚚{" "}
-                {money(store.deliveryFee)}
+            <Image source={{ uri: store.imageUrl }} style={styles.templateStoreThumb} />
+            <View style={styles.templateStoreContent}>
+              <View style={styles.rowBetween}>
+                <Text style={styles.templateStoreName}>{store.name}</Text>
+                <View style={styles.templateRatingPill}>
+                  <MaterialCommunityIcons name="star" size={12} color="#111827" />
+                  <Text style={styles.templateRatingText}>{store.rating.toFixed(1)}</Text>
+                </View>
+              </View>
+              <Text numberOfLines={2} style={styles.templateStoreDesc}>
+                {store.description}
               </Text>
+              <View style={styles.rowActions}>
+                <View style={styles.templateMetaPill}>
+                  <MaterialCommunityIcons name="clock-outline" size={12} color="#6B7280" />
+                  <Text style={styles.templateMetaText}>{store.etaMinutes} min</Text>
+                </View>
+                <View style={styles.templateMetaPill}>
+                  <MaterialCommunityIcons name="bike-fast" size={12} color="#6B7280" />
+                  <Text style={styles.templateMetaText}>{money(store.deliveryFee)}</Text>
+                </View>
+              </View>
             </View>
           </Pressable>
         ))}
         {filteredStores.length === 0 ? (
           <View style={styles.emptyBox}>
-            <MaterialCommunityIcons name="store-search-outline" size={28} color="#00A082" />
+            <MaterialCommunityIcons
+              name="store-search-outline"
+              size={28}
+              color={templatePalette.primaryDark}
+            />
             <Text style={styles.emptyBoxText}>
               Aucun restaurant pour le moment. Cree un compte Admin, fais valider par Super
               Admin, puis ajoute des produits.
@@ -925,7 +1025,11 @@ export default function App() {
 
       {cartItems.length === 0 ? (
         <View style={styles.emptyBox}>
-          <MaterialCommunityIcons name="cart-outline" size={30} color="#8FA1CB" />
+          <MaterialCommunityIcons
+            name="cart-outline"
+            size={30}
+            color={templatePalette.primaryDark}
+          />
           <Text style={styles.emptyBoxText}>Ajoutez des produits pour commander</Text>
         </View>
       ) : (
@@ -1009,14 +1113,18 @@ export default function App() {
 
       {!orderId || !orderDetails || !tracking ? (
         <View style={styles.emptyBox}>
-          <MaterialCommunityIcons name="map-marker-path" size={30} color="#8FA1CB" />
+          <MaterialCommunityIcons
+            name="map-marker-path"
+            size={30}
+            color={templatePalette.primaryDark}
+          />
           <Text style={styles.emptyBoxText}>
             Passez une commande pour activer le tracking.
           </Text>
         </View>
       ) : (
         <>
-          <LinearGradient colors={["#E0F2FE", "#ECFDF5"]} style={styles.trackingHero}>
+          <LinearGradient colors={["#FFF3C4", "#FFF7D6"]} style={styles.trackingHero}>
             <Text style={styles.trackingStatus}>{orderDetails.statusLabel}</Text>
             <Text style={styles.trackingEta}>Paiement: {orderDetails.paymentStatus}</Text>
             <Text style={styles.trackingEta}>ETA {tracking.etaMinutes} min</Text>
@@ -1064,7 +1172,7 @@ export default function App() {
       {!adminDashboard ? (
         <View style={styles.emptyBox}>
           {loadingRoleData ? (
-            <ActivityIndicator size="small" color="#00A082" />
+            <ActivityIndicator size="small" color={templatePalette.primaryDark} />
           ) : (
             <Text style={styles.emptyBoxText}>Aucune donnee dashboard</Text>
           )}
@@ -1122,7 +1230,7 @@ export default function App() {
                 <MaterialCommunityIcons
                   name="storefront-outline"
                   size={18}
-                  color="#00A082"
+                  color={templatePalette.primaryDark}
                 />
               </View>
               <Text style={styles.infoCardText}>
@@ -1273,7 +1381,7 @@ export default function App() {
             <MaterialCommunityIcons
               name={product.isAvailable ? "check-circle-outline" : "close-circle-outline"}
               size={18}
-              color={product.isAvailable ? "#00A082" : "#EF4444"}
+              color={product.isAvailable ? templatePalette.primaryDark : "#EF4444"}
             />
           </View>
           <Text style={styles.infoCardText}>
@@ -1385,7 +1493,11 @@ export default function App() {
       <View style={styles.rowBetween}>
         <Text style={styles.sectionTitle}>Validation Admin / Livreur</Text>
         <Pressable style={styles.iconButton} onPress={() => void refreshSuperData()}>
-          <MaterialCommunityIcons name="refresh" size={18} color="#00A082" />
+          <MaterialCommunityIcons
+            name="refresh"
+            size={18}
+            color={templatePalette.primaryDark}
+          />
         </Pressable>
       </View>
       <Text style={styles.supportingText}>
@@ -1658,7 +1770,7 @@ export default function App() {
               <MaterialCommunityIcons
                 name="information-outline"
                 size={16}
-                color="#065F46"
+                color={templatePalette.ink}
               />
               <Text style={styles.infoBannerText}>{infoMessage}</Text>
             </View>
@@ -1721,7 +1833,7 @@ export default function App() {
                       <MaterialCommunityIcons
                         name={entry.icon}
                         size={16}
-                        color={selected ? "#00796B" : "#64748B"}
+                        color={selected ? templatePalette.ink : "#64748B"}
                         style={{ marginBottom: 4 }}
                       />
                       <Text
@@ -1825,14 +1937,19 @@ export default function App() {
       <SafeAreaView style={styles.safeArea}>
         <StatusBar style="dark" />
         <View style={styles.root}>
-          <Appbar.Header mode="small" style={styles.paperAppbar}>
-            <Appbar.Content
-              title="Livraison Pro"
-              subtitle={`${currentUser.role} · ${activeTabLabel}`}
-            />
-            <Appbar.Action icon="refresh" onPress={refreshCurrentContext} />
-            <Appbar.Action icon="account-circle-outline" onPress={() => setActiveTab("profile")} />
-          </Appbar.Header>
+          {currentUser.role !== "CLIENT" ? (
+            <Appbar.Header mode="small" style={styles.paperAppbar}>
+              <Appbar.Content
+                title="Livraison Pro"
+                subtitle={`${currentUser.role} · ${activeTabLabel}`}
+              />
+              <Appbar.Action icon="refresh" onPress={refreshCurrentContext} />
+              <Appbar.Action
+                icon="account-circle-outline"
+                onPress={() => setActiveTab("profile")}
+              />
+            </Appbar.Header>
+          ) : null}
 
           <View style={styles.content}>{renderRoleContent()}</View>
           <BottomNavigation.Bar
@@ -1848,7 +1965,7 @@ export default function App() {
                 color={color}
               />
             )}
-            activeColor="#00A082"
+            activeColor={templatePalette.primaryDark}
             inactiveColor="#94A3B8"
             style={styles.paperBottomBar}
           />
@@ -1877,7 +1994,7 @@ export default function App() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#F8FAFC",
+    backgroundColor: templatePalette.background,
   },
   root: {
     flex: 1,
@@ -1886,20 +2003,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   paperAppbar: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: templatePalette.surface,
     borderBottomWidth: 1,
-    borderBottomColor: "#E2E8F0",
+    borderBottomColor: templatePalette.border,
   },
   paperBottomBar: {
-    backgroundColor: "#FFFFFF",
+    backgroundColor: templatePalette.surface,
     borderTopWidth: 1,
-    borderTopColor: "#E2E8F0",
+    borderTopColor: templatePalette.border,
   },
   paperErrorSnackbar: {
     backgroundColor: "#B91C1C",
   },
   paperInfoSnackbar: {
-    backgroundColor: "#065F46",
+    backgroundColor: "#1F2937",
   },
   authScreen: {
     flex: 1,
@@ -1922,8 +2039,8 @@ const styles = StyleSheet.create({
   authCard: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
-    backgroundColor: "#FFFFFF",
+    borderColor: templatePalette.border,
+    backgroundColor: templatePalette.surface,
     padding: 14,
   },
   authModeRow: {
@@ -1941,15 +2058,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   authModeChipActive: {
-    borderColor: "#00A082",
-    backgroundColor: "#E6FFFA",
+    borderColor: templatePalette.primaryDark,
+    backgroundColor: "#FFF3C4",
   },
   authModeText: {
     color: "#475569",
     fontWeight: "600",
   },
   authModeTextActive: {
-    color: "#00796B",
+    color: templatePalette.ink,
   },
   authRoleRow: {
     flexDirection: "row",
@@ -1966,8 +2083,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   authRoleChipActive: {
-    borderColor: "#00A082",
-    backgroundColor: "#E6FFFA",
+    borderColor: templatePalette.primaryDark,
+    backgroundColor: "#FFF3C4",
   },
   authRoleText: {
     color: "#475569",
@@ -1975,7 +2092,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   authRoleTextActive: {
-    color: "#00796B",
+    color: templatePalette.ink,
   },
   authInput: {
     borderRadius: 10,
@@ -2029,6 +2146,215 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 14,
   },
+  templateHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  templateGreeting: {
+    color: "#111827",
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  templateLocation: {
+    color: "#6B7280",
+    marginTop: 4,
+    fontSize: 13,
+  },
+  templatePageTitle: {
+    color: "#111827",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  templateIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: templatePalette.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  templateFilterButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: templatePalette.primary,
+  },
+  templatePromoCard: {
+    height: 170,
+    borderRadius: 20,
+    overflow: "hidden",
+    marginBottom: 12,
+    backgroundColor: "#111827",
+  },
+  templatePromoImage: {
+    width: "100%",
+    height: "100%",
+  },
+  templatePromoOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "flex-end",
+    padding: 14,
+  },
+  templatePromoBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: templatePalette.primary,
+    color: "#111827",
+    fontWeight: "700",
+    fontSize: 11,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    marginBottom: 8,
+  },
+  templatePromoTitle: {
+    color: "#FFFFFF",
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  templatePromoSubtitle: {
+    color: "#F3F4F6",
+    marginTop: 4,
+  },
+  templateSectionLabel: {
+    color: "#111827",
+    fontSize: 16,
+    fontWeight: "700",
+    marginBottom: 8,
+    marginTop: 6,
+  },
+  templateCategoriesContainer: {
+    paddingBottom: 12,
+    gap: 8,
+  },
+  templateCategoryChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: templatePalette.border,
+    backgroundColor: "#FFFFFF",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  templateCategoryChipActive: {
+    backgroundColor: templatePalette.primary,
+    borderColor: templatePalette.primary,
+  },
+  templateCategoryText: {
+    color: "#374151",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  templateCategoryTextActive: {
+    color: "#111827",
+  },
+  templateStoreRowCard: {
+    flexDirection: "row",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: templatePalette.border,
+    backgroundColor: "#FFFFFF",
+    padding: 9,
+    marginBottom: 10,
+    gap: 10,
+  },
+  templateStoreThumb: {
+    width: 84,
+    height: 84,
+    borderRadius: 12,
+  },
+  templateStoreContent: {
+    flex: 1,
+    justifyContent: "space-between",
+  },
+  templateStoreName: {
+    color: "#111827",
+    fontSize: 15,
+    fontWeight: "700",
+    flex: 1,
+    marginRight: 8,
+  },
+  templateStoreDesc: {
+    color: "#6B7280",
+    fontSize: 12,
+    lineHeight: 16,
+    marginVertical: 5,
+  },
+  templateRatingPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    borderRadius: 999,
+    backgroundColor: "#FFF7D6",
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+  },
+  templateRatingText: {
+    color: "#111827",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  templateMetaPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: "#F9FAFB",
+  },
+  templateMetaText: {
+    color: "#6B7280",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  templateStoreHeroCard: {
+    borderRadius: 20,
+    overflow: "hidden",
+    marginBottom: 12,
+  },
+  templateStoreHeroOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "flex-end",
+    padding: 14,
+  },
+  templateStoreHeroTitle: {
+    color: "#FFFFFF",
+    fontSize: 22,
+    fontWeight: "800",
+  },
+  templateStoreHeroSubtitle: {
+    color: "#E5E7EB",
+    marginTop: 4,
+    fontSize: 13,
+  },
+  templateProductRowCard: {
+    flexDirection: "row",
+    backgroundColor: "#FFFFFF",
+    borderColor: templatePalette.border,
+    borderWidth: 1,
+    borderRadius: 14,
+    marginBottom: 10,
+    overflow: "hidden",
+  },
+  templateStockText: {
+    color: "#6B7280",
+    fontSize: 11,
+    fontWeight: "600",
+    marginTop: 6,
+    marginRight: 4,
+  },
   categoriesContainer: {
     paddingBottom: 12,
     gap: 8,
@@ -2042,8 +2368,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
   },
   categoryChipActive: {
-    backgroundColor: "#00A082",
-    borderColor: "#00A082",
+    backgroundColor: templatePalette.primary,
+    borderColor: templatePalette.primary,
   },
   categoryChipText: {
     color: "#334155",
@@ -2150,14 +2476,14 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   productPrice: {
-    color: "#00A082",
+    color: templatePalette.ink,
     fontWeight: "700",
   },
   addButton: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: "#00A082",
+    backgroundColor: templatePalette.primary,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2186,7 +2512,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   cartItemPrice: {
-    color: "#00A082",
+    color: templatePalette.primaryDark,
     fontWeight: "700",
   },
   quantityControls: {
@@ -2251,7 +2577,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   pricingTotalValue: {
-    color: "#00A082",
+    color: templatePalette.primaryDark,
     fontWeight: "700",
     fontSize: 16,
   },
@@ -2261,7 +2587,7 @@ const styles = StyleSheet.create({
   },
   checkoutButton: {
     borderRadius: 14,
-    backgroundColor: "#00A082",
+    backgroundColor: templatePalette.primary,
     minHeight: 48,
     alignItems: "center",
     justifyContent: "center",
@@ -2273,20 +2599,20 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   checkoutButtonText: {
-    color: "#FFFFFF",
+    color: templatePalette.ink,
     fontWeight: "700",
     fontSize: 15,
   },
   secondaryButton: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#00A082",
+    borderColor: templatePalette.primaryDark,
     alignItems: "center",
     paddingVertical: 12,
     marginBottom: 8,
   },
   secondaryButtonText: {
-    color: "#00796B",
+    color: templatePalette.ink,
     fontWeight: "700",
   },
   trackingHero: {
@@ -2334,7 +2660,7 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 5,
     marginTop: 6,
-    backgroundColor: "#00A082",
+    backgroundColor: templatePalette.primaryDark,
   },
   timelineLabel: {
     color: "#111827",
@@ -2386,7 +2712,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: "#00A082",
+    backgroundColor: templatePalette.primary,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -2414,7 +2740,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   statValue: {
-    color: "#00A082",
+    color: templatePalette.primaryDark,
     fontSize: 22,
     fontWeight: "700",
     textAlign: "center",
@@ -2464,7 +2790,7 @@ const styles = StyleSheet.create({
   smallAction: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#00A082",
+    borderColor: templatePalette.primaryDark,
     paddingVertical: 8,
     paddingHorizontal: 12,
   },
@@ -2472,7 +2798,7 @@ const styles = StyleSheet.create({
     borderColor: "#EF4444",
   },
   smallActionText: {
-    color: "#00796B",
+    color: templatePalette.ink,
     fontWeight: "600",
     fontSize: 12,
   },
@@ -2498,8 +2824,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#6EE7B7",
-    backgroundColor: "#ECFDF5",
+    borderColor: "#FCD34D",
+    backgroundColor: "#FFFBEB",
     paddingHorizontal: 10,
     paddingVertical: 8,
     flexDirection: "row",
@@ -2507,7 +2833,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   infoBannerText: {
-    color: "#065F46",
+    color: templatePalette.ink,
     flex: 1,
   },
   tabBar: {
@@ -2531,7 +2857,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   tabLabelActive: {
-    color: "#00A082",
+    color: templatePalette.primaryDark,
     fontWeight: "600",
   },
 });

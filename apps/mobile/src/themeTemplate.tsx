@@ -32,7 +32,7 @@ export function ThemeHeaderCard({
         <Avatar.Icon
           size={38}
           style={styles.iconWrap}
-          color="#00A082"
+          color="#D89B00"
           icon={({ size, color }) => (
             <MaterialCommunityIcons name={icon} size={size} color={color} />
           )}
@@ -48,7 +48,12 @@ export function ThemeHeaderCard({
       </Card.Content>
       {actionLabel && onActionPress ? (
         <Card.Actions style={styles.cardActions}>
-          <Button mode="contained-tonal" onPress={onActionPress}>
+          <Button
+            mode="contained"
+            buttonColor="#F5C518"
+            textColor="#111827"
+            onPress={onActionPress}
+          >
             {actionLabel}
           </Button>
         </Card.Actions>
@@ -63,7 +68,7 @@ export function ThemeMetricCard({ icon, value, label }: ThemeMetricCardProps) {
       <Avatar.Icon
         size={28}
         style={styles.metricIconWrap}
-        color="#00A082"
+        color="#D89B00"
         icon={({ size, color }) => (
           <MaterialCommunityIcons name={icon} size={size} color={color} />
         )}
@@ -83,6 +88,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     marginBottom: 12,
     backgroundColor: "#FFFFFF",
+    borderColor: "#E5E7EB",
   },
   headerMain: {
     flexDirection: "row",
@@ -90,7 +96,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   iconWrap: {
-    backgroundColor: "#E6FFFA",
+    backgroundColor: "#FFF3C4",
   },
   headerContent: {
     flex: 1,
@@ -112,17 +118,17 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderColor: "#E5E7EB",
     backgroundColor: "#FFFFFF",
     padding: 12,
     alignItems: "center",
   },
   metricIconWrap: {
-    backgroundColor: "#ECFDF5",
+    backgroundColor: "#FFF7D6",
     marginBottom: 8,
   },
   metricValue: {
-    color: "#00A082",
+    color: "#D89B00",
     fontWeight: "800",
     textAlign: "center",
   },
