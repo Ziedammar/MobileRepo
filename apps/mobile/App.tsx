@@ -27,7 +27,9 @@ import {
   api,
   getAdminDashboardWsUrl,
   getOrderWsUrl,
+  getRideWsUrl,
   setAuthToken,
+  setRefreshToken,
 } from "./src/api";
 import { ThemeHeaderCard, ThemeMetricCard } from "./src/themeTemplate";
 import type {
@@ -38,10 +40,21 @@ import type {
   Courier,
   HomeResponse,
   LivreurOrdersResponse,
+  NotificationsResponse,
   OrderDetails,
+  PaymentMethodType,
+  PaymentTransaction,
   Product,
+  Ride,
+  RideHomeResponse,
+  RideOption,
+  RideOptionsResponse,
+  RideSearchResponse,
+  RideTrackingResponse,
+  SupportTicket,
   StoreDetails,
   TrackingResponse,
+  UserPaymentMethod,
   UserRole,
 } from "./src/types";
 
@@ -71,9 +84,9 @@ const clientTabs: Array<{
   label: string;
   icon: keyof typeof MaterialCommunityIcons.glyphMap;
 }> = [
-  { key: "home", label: "Accueil", icon: "home-variant-outline" },
-  { key: "cart", label: "Panier", icon: "cart-outline" },
-  { key: "tracking", label: "Suivi", icon: "map-marker-path" },
+  { key: "home", label: "Ride", icon: "map-search-outline" },
+  { key: "cart", label: "Historique", icon: "history" },
+  { key: "tracking", label: "Course live", icon: "car-connected" },
   { key: "profile", label: "Profil", icon: "account-circle-outline" },
 ];
 
@@ -187,6 +200,7 @@ export default function App() {
   const [searchValue, setSearchValue] = useState("");
 
   const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [sessionRefreshToken, setSessionRefreshToken] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
 
   const [authMode, setAuthMode] = useState<AuthMode>("signin");
@@ -204,6 +218,35 @@ export default function App() {
   const [orderId, setOrderId] = useState<string | null>(null);
   const [orderDetails, setOrderDetails] = useState<OrderDetails | null>(null);
   const [tracking, setTracking] = useState<TrackingResponse | null>(null);
+  const [rideHome, setRideHome] = useState<RideHomeResponse | null>(null);
+  const [rideSearchQuery, setRideSearchQuery] = useState("");
+  const [rideSearchResults, setRideSearchResults] = useState<RideSearchResponse | null>(null);
+  const [selectedDestination, setSelectedDestination] = useState<{
+    title: string;
+    address: string;
+    lat: number;
+    lng: number;
+  } | null>(null);
+  const [rideOptions, setRideOptions] = useState<RideOption[]>([]);
+  const [rideOptionsMeta, setRideOptionsMeta] = useState<RideOptionsResponse | null>(null);
+  const [selectedRideOption, setSelectedRideOption] = useState<RideOption | null>(null);
+  const [activeRide, setActiveRide] = useState<Ride | null>(null);
+  const [activeRideTracking, setActiveRideTracking] = useState<RideTrackingResponse | null>(
+    null,
+  );
+  const [rideHistory, setRideHistory] = useState<Ride[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<UserPaymentMethod[]>([]);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] =
+    useState<PaymentMethodType>("CARD");
+  const [couponCode, setCouponCode] = useState("");
+  const [paymentsHistory, setPaymentsHistory] = useState<PaymentTransaction[]>([]);
+  const [notifications, setNotifications] = useState<NotificationsResponse | null>(null);
+  const [supportFaqs, setSupportFaqs] = useState<Array<{ question: string; answer: string }>>(
+    [],
+  );
+  const [supportTickets, setSupportTickets] = useState<SupportTicket[]>([]);
+  const [supportSubject, setSupportSubject] = useState("");
+  const [supportMessage, setSupportMessage] = useState("");
 
   const [adminDashboard, setAdminDashboard] =
     useState<AdminDashboardResponse | null>(null);
@@ -289,11 +332,13 @@ export default function App() {
 
   useEffect(() => {
     setAuthToken(sessionToken);
-  }, [sessionToken]);
+    setRefreshToken(sessionRefreshToken);
+  }, [sessionToken, sessionRefreshToken]);
 
   const applyAuthResponse = (response: AuthResponse) => {
     if (response.token && response.user.accessStatus === "ACTIVE") {
       setSessionToken(response.token);
+      setSessionRefreshToken(response.refreshToken ?? null);
       setCurrentUser(response.user);
       setInfoMessage(response.message);
       setErrorMessage(null);
@@ -302,6 +347,7 @@ export default function App() {
     }
 
     setSessionToken(null);
+    setSessionRefreshToken(null);
     setCurrentUser(null);
     setInfoMessage(response.message);
     setErrorMessage(null);
@@ -374,15 +420,29 @@ export default function App() {
     }
   };
 
-  const logout = () => {
-    setSessionToken(null);
-    setCurrentUser(null);
-    setAuthToken(null);
-    setActiveTab("home");
-    setOrderId(null);
-    setOrderDetails(null);
-    setTracking(null);
-    setInfoMessage("Session deconnectee");
+  const logout = async () => {
+    try {
+      if (sessionRefreshToken) {
+        await api.logout();
+      }
+    } catch {
+      // ignore logout API error
+    } finally {
+      setSessionToken(null);
+      setSessionRefreshToken(null);
+      setCurrentUser(null);
+      setAuthToken(null);
+      setRefreshToken(null);
+      setActiveTab("home");
+      setOrderId(null);
+      setOrderDetails(null);
+      setTracking(null);
+      setActiveRide(null);
+      setActiveRideTracking(null);
+      setRideHistory([]);
+      setNotifications(null);
+      setInfoMessage("Session deconnectee");
+    }
   };
 
   const refreshOrder = async (targetOrderId: string) => {
@@ -392,6 +452,187 @@ export default function App() {
     ]);
     setOrderDetails(details);
     setTracking(trackingData);
+  };
+
+  const refreshRideContext = async () => {
+    try {
+      const [
+        rideHomeData,
+        history,
+        methods,
+        notificationsData,
+        paymentHistoryData,
+        faqs,
+        tickets,
+      ] = await Promise.all([
+        api.getRideHome(),
+        api.getRideHistory(),
+        api.getPaymentMethods(),
+        api.getNotifications(),
+        api.getPaymentsHistory(),
+        api.getSupportFaqs(),
+        api.getSupportTickets(),
+      ]);
+
+      setRideHome(rideHomeData);
+      setRideHistory(history);
+      setPaymentMethods(methods);
+      setNotifications(notificationsData);
+      setPaymentsHistory(paymentHistoryData);
+      setSupportFaqs(faqs);
+      setSupportTickets(tickets);
+
+      const firstMethod = methods.find((method) => method.isDefault) ?? methods[0];
+      if (firstMethod) {
+        setSelectedPaymentMethod(firstMethod.type);
+      }
+
+      const ongoingRide =
+        history.find(
+          (ride) =>
+            ride.status === "PENDING" ||
+            ride.status === "ACCEPTED" ||
+            ride.status === "ONGOING",
+        ) ?? null;
+      if (ongoingRide) {
+        setActiveRide(ongoingRide);
+      }
+    } catch (error) {
+      setErrorMessage(errorText(error));
+    }
+  };
+
+  const searchRideDestinations = async (query: string) => {
+    setRideSearchQuery(query);
+    if (!query.trim()) {
+      setRideSearchResults(null);
+      return;
+    }
+    try {
+      const result = await api.searchRideDestination(query.trim());
+      setRideSearchResults(result);
+    } catch (error) {
+      setErrorMessage(errorText(error));
+    }
+  };
+
+  const loadRideOptions = async (destination: {
+    title: string;
+    address: string;
+    lat: number;
+    lng: number;
+  }) => {
+    if (!rideHome) {
+      return;
+    }
+    try {
+      setSelectedDestination(destination);
+      const options = await api.getRideOptions({
+        pickupLat: rideHome.userLocation.lat,
+        pickupLng: rideHome.userLocation.lng,
+        destinationLat: destination.lat,
+        destinationLng: destination.lng,
+      });
+      setRideOptions(options.options);
+      setRideOptionsMeta(options);
+      setSelectedRideOption(options.options[0] ?? null);
+      setActiveTab("cart");
+    } catch (error) {
+      setErrorMessage(errorText(error));
+    }
+  };
+
+  const requestRide = async () => {
+    if (!rideHome || !selectedDestination || !selectedRideOption) {
+      setErrorMessage("Selectionne une destination et un type de trajet");
+      return;
+    }
+    try {
+      const createdRide = await api.createRide({
+        pickupAddress: rideHome.userLocation.address,
+        pickupLat: rideHome.userLocation.lat,
+        pickupLng: rideHome.userLocation.lng,
+        destinationAddress: selectedDestination.address,
+        destinationLat: selectedDestination.lat,
+        destinationLng: selectedDestination.lng,
+        serviceType: selectedRideOption.serviceType,
+        paymentMethodType: selectedPaymentMethod,
+        promoCode: couponCode.trim() ? couponCode.trim() : undefined,
+      });
+      setActiveRide(createdRide);
+      setInfoMessage("Trajet cree avec succes");
+      setActiveTab("tracking");
+      await refreshRideContext();
+    } catch (error) {
+      setErrorMessage(errorText(error));
+    }
+  };
+
+  const refreshActiveRide = async () => {
+    if (!activeRide?.id) {
+      return;
+    }
+
+    try {
+      const [ride, trackingData] = await Promise.all([
+        api.getRide(activeRide.id),
+        api.getRideTracking(activeRide.id),
+      ]);
+      setActiveRide(ride);
+      setActiveRideTracking(trackingData);
+    } catch (error) {
+      setErrorMessage(errorText(error));
+    }
+  };
+
+  const cancelRideRequest = async () => {
+    if (!activeRide?.id) {
+      return;
+    }
+    try {
+      await api.cancelRide(activeRide.id, "Annule par le client");
+      await refreshActiveRide();
+      await refreshRideContext();
+      setInfoMessage("Course annulee");
+    } catch (error) {
+      setErrorMessage(errorText(error));
+    }
+  };
+
+  const payForRide = async () => {
+    if (!activeRide?.id) {
+      return;
+    }
+    try {
+      await api.payRide(activeRide.id, {
+        methodType: selectedPaymentMethod,
+        couponCode: couponCode.trim() ? couponCode.trim() : undefined,
+      });
+      await refreshRideContext();
+      setInfoMessage("Paiement confirme et facture generee");
+    } catch (error) {
+      setErrorMessage(errorText(error));
+    }
+  };
+
+  const createSupportTicket = async () => {
+    if (!supportSubject.trim() || !supportMessage.trim()) {
+      setErrorMessage("Sujet et message support obligatoires");
+      return;
+    }
+    try {
+      await api.createSupportTicket({
+        subject: supportSubject.trim(),
+        message: supportMessage.trim(),
+      });
+      setSupportSubject("");
+      setSupportMessage("");
+      setInfoMessage("Ticket support cree");
+      const tickets = await api.getSupportTickets();
+      setSupportTickets(tickets);
+    } catch (error) {
+      setErrorMessage(errorText(error));
+    }
   };
 
   useEffect(() => {
@@ -530,6 +771,47 @@ export default function App() {
     const interval = setInterval(() => void refreshHome(), 8000);
     return () => clearInterval(interval);
   }, [currentUser?.role]);
+
+  useEffect(() => {
+    if (!sessionToken || currentUser?.role !== "CLIENT") {
+      return;
+    }
+    void refreshRideContext();
+  }, [sessionToken, currentUser?.role]);
+
+  useEffect(() => {
+    if (!sessionToken || currentUser?.role !== "CLIENT" || !activeRide?.id) {
+      return;
+    }
+
+    void refreshActiveRide();
+    const interval = setInterval(() => void refreshActiveRide(), 7000);
+    return () => clearInterval(interval);
+  }, [sessionToken, currentUser?.role, activeRide?.id]);
+
+  useEffect(() => {
+    if (!sessionToken || currentUser?.role !== "CLIENT" || !activeRide?.id) {
+      return;
+    }
+
+    const ws = new WebSocket(getRideWsUrl(activeRide.id, sessionToken));
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          type?: string;
+          rideId?: string;
+        };
+        if (payload.type === "ride:refresh" && payload.rideId === activeRide.id) {
+          void refreshActiveRide();
+          void refreshRideContext();
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    return () => ws.close();
+  }, [sessionToken, currentUser?.role, activeRide?.id]);
 
   useEffect(() => {
     if (currentUser?.role !== "CLIENT" || !selectedStore?.id) {
@@ -840,329 +1122,285 @@ export default function App() {
   }, [currentUser]);
 
   const renderClientHome = () => {
-    if (selectedStore) {
-      const customerPoint = {
-        latitude: 36.842,
-        longitude: 10.272,
-      };
-      const storePoint = {
-        latitude: selectedStore.lat,
-        longitude: selectedStore.lng,
-      };
-      const storeRegion = computeMapRegion([storePoint, customerPoint]);
-
-      return (
-        <View style={styles.screen}>
-          <View style={styles.rowBetween}>
-            <Pressable
-              style={styles.templateIconCircle}
-              onPress={() => setSelectedStore(null)}
-            >
-              <MaterialCommunityIcons
-                name="chevron-left"
-                size={20}
-                color={templatePalette.ink}
-              />
-            </Pressable>
-            <Text style={styles.templatePageTitle}>{selectedStore.name}</Text>
-            <View style={{ width: 32 }} />
-          </View>
-
-          <ScrollView showsVerticalScrollIndicator={false}>
-            <View style={styles.templateStoreHeroCard}>
-              <Image source={{ uri: selectedStore.imageUrl }} style={styles.storeHeroImage} />
-              <LinearGradient
-                colors={["transparent", "rgba(0,0,0,0.65)"]}
-                style={styles.templateStoreHeroOverlay}
-              >
-                <Text style={styles.templateStoreHeroTitle}>{selectedStore.name}</Text>
-                <Text style={styles.templateStoreHeroSubtitle}>
-                  {selectedStore.category} · ⭐ {selectedStore.rating.toFixed(1)}
-                </Text>
-              </LinearGradient>
-            </View>
-            <Text style={styles.supportingText}>{selectedStore.description}</Text>
-
-            <View style={styles.templateMapCard}>
-              <Text style={styles.mapCardTitle}>Localisation restaurant</Text>
-              <MapView style={styles.templateMapView} initialRegion={storeRegion}>
-                <Marker coordinate={storePoint} title={selectedStore.name} pinColor="#111827" />
-                <Marker
-                  coordinate={customerPoint}
-                  title="Votre adresse"
-                  description={addressText}
-                  pinColor={templatePalette.primaryDark}
-                />
-                <Polyline
-                  coordinates={[storePoint, customerPoint]}
-                  strokeColor={templatePalette.primaryDark}
-                  strokeWidth={3}
-                />
-              </MapView>
-            </View>
-
-            {selectedStore.products.map((product) => (
-              <View key={product.id} style={styles.templateProductRowCard}>
-                <Image source={{ uri: product.imageUrl }} style={styles.productImage} />
-                <View style={styles.productContent}>
-                  <Text style={styles.productName}>{product.name}</Text>
-                  <Text style={styles.productDescription}>{product.description}</Text>
-                  <View style={styles.rowBetween}>
-                    <Text style={styles.productPrice}>{money(product.price)}</Text>
-                    <View style={styles.rowActions}>
-                      <Text style={styles.templateStockText}>Stock {product.stock ?? 0}</Text>
-                      <Pressable
-                        style={styles.addButton}
-                        onPress={() => addProductToCart(selectedStore.id, product)}
-                      >
-                        <MaterialCommunityIcons name="plus" size={16} color="#111827" />
-                      </Pressable>
-                    </View>
-                  </View>
-                </View>
-              </View>
-            ))}
-          </ScrollView>
-        </View>
-      );
-    }
-
-    if (loadingHome) {
+    if (!rideHome) {
       return (
         <View style={styles.centeredState}>
           <ActivityIndicator size="large" color={templatePalette.primaryDark} />
-          <Text style={styles.centeredStateText}>Chargement...</Text>
+          <Text style={styles.centeredStateText}>Chargement carte et suggestions...</Text>
         </View>
       );
     }
 
-    if (!home) {
-      return (
-        <View style={styles.centeredState}>
-          <Text style={styles.centeredStateText}>Impossible de charger l'accueil.</Text>
-        </View>
-      );
-    }
-
-    const heroStore = filteredStores[0] ?? home.stores[0];
-    const heroImage =
-      heroStore?.imageUrl ??
-      "https://images.unsplash.com/photo-1504674900247-0877df9cc836?auto=format&fit=crop&w=1200&q=80";
+    const mapRegion = computeMapRegion([
+      {
+        latitude: rideHome.userLocation.lat,
+        longitude: rideHome.userLocation.lng,
+      },
+      ...(selectedDestination
+        ? [
+            {
+              latitude: selectedDestination.lat,
+              longitude: selectedDestination.lng,
+            },
+          ]
+        : []),
+    ]);
 
     return (
       <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
-        <View style={styles.templateHeaderRow}>
+        <View style={styles.rowBetween}>
           <View>
-            <Text style={styles.templateGreeting}>Hey 👋</Text>
-            <Text style={styles.templateLocation}>Livraison a Tunis</Text>
+            <Text style={styles.sectionTitle}>Accueil Ride</Text>
+            <Text style={styles.supportingText}>
+              Carte interactive + recherche intelligente
+            </Text>
           </View>
           <Pressable style={styles.templateIconCircle} onPress={() => setActiveTab("profile")}>
             <MaterialCommunityIcons
-              name="account-outline"
+              name="account-circle-outline"
               size={20}
               color={templatePalette.ink}
             />
           </Pressable>
         </View>
 
+        <View style={styles.mapCard}>
+          <MapView style={styles.trackingMapView} initialRegion={mapRegion}>
+            <Marker
+              coordinate={{
+                latitude: rideHome.userLocation.lat,
+                longitude: rideHome.userLocation.lng,
+              }}
+              title="Vous"
+              description={rideHome.userLocation.address}
+              pinColor="#111827"
+            />
+            {selectedDestination ? (
+              <Marker
+                coordinate={{
+                  latitude: selectedDestination.lat,
+                  longitude: selectedDestination.lng,
+                }}
+                title={selectedDestination.title}
+                description={selectedDestination.address}
+                pinColor={templatePalette.primaryDark}
+              />
+            ) : null}
+          </MapView>
+        </View>
+
         <View style={styles.searchBox}>
           <MaterialCommunityIcons name="magnify" size={18} color="#6B7280" />
           <TextInput
-            value={searchValue}
-            onChangeText={setSearchValue}
-            placeholder="Search burger, pizza, sushi..."
+            value={rideSearchQuery}
+            onChangeText={(value) => void searchRideDestinations(value)}
+            placeholder={rideHome.whereToLabel}
             placeholderTextColor="#94A3B8"
             style={styles.searchInput}
           />
-          <Pressable style={styles.templateFilterButton} onPress={() => setSelectedCategory("Tous")}>
-            <MaterialCommunityIcons name="tune-variant" size={16} color="#111827" />
-          </Pressable>
         </View>
 
-        <Pressable style={styles.templatePromoCard} onPress={() => void refreshHome(true)}>
-          <Image source={{ uri: heroImage }} style={styles.templatePromoImage} />
-          <LinearGradient
-            colors={["rgba(0,0,0,0.1)", "rgba(0,0,0,0.72)"]}
-            style={styles.templatePromoOverlay}
-          >
-            <Text style={styles.templatePromoBadge}>OFFRE DU JOUR</Text>
-            <Text style={styles.templatePromoTitle}>Livraison express</Text>
-            <Text style={styles.templatePromoSubtitle}>
-              Jusqu'a -30% sur tes restos favoris
-            </Text>
-          </LinearGradient>
-        </Pressable>
-
-        <Text style={styles.templateSectionLabel}>Categories</Text>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.templateCategoriesContainer}
-        >
-          {categories.map((category) => {
-            const selected = category === selectedCategory;
-            return (
-              <Pressable
-                key={category}
-                style={[
-                  styles.templateCategoryChip,
-                  selected ? styles.templateCategoryChipActive : null,
-                ]}
-                onPress={() => setSelectedCategory(category)}
-              >
-                <MaterialCommunityIcons
-                  name={categoryIconFor(category)}
-                  size={16}
-                  color={selected ? "#111827" : "#6B7280"}
-                />
-                <Text
-                  style={[
-                    styles.templateCategoryText,
-                    selected ? styles.templateCategoryTextActive : null,
-                  ]}
-                >
-                  {category}
-                </Text>
-              </Pressable>
-            );
-          })}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          {rideHome.quickSuggestions.map((suggestion) => (
+            <Pressable
+              key={suggestion}
+              style={styles.templateCategoryChip}
+              onPress={() => void searchRideDestinations(suggestion)}
+            >
+              <Text style={styles.templateCategoryText}>{suggestion}</Text>
+            </Pressable>
+          ))}
         </ScrollView>
 
-        <Text style={styles.templateSectionLabel}>Popular restaurants</Text>
-        {filteredStores.map((store) => (
+        <View style={styles.rowActions}>
+          {rideHome.shortcuts.home ? (
+            <Pressable
+              style={styles.smallAction}
+              onPress={() =>
+                void loadRideOptions({
+                  title: "Home",
+                  address: rideHome.shortcuts.home!.address,
+                  lat: rideHome.shortcuts.home!.lat,
+                  lng: rideHome.shortcuts.home!.lng,
+                })
+              }
+            >
+              <Text style={styles.smallActionText}>Home</Text>
+            </Pressable>
+          ) : null}
+          {rideHome.shortcuts.work ? (
+            <Pressable
+              style={styles.smallAction}
+              onPress={() =>
+                void loadRideOptions({
+                  title: "Work",
+                  address: rideHome.shortcuts.work!.address,
+                  lat: rideHome.shortcuts.work!.lat,
+                  lng: rideHome.shortcuts.work!.lng,
+                })
+              }
+            >
+              <Text style={styles.smallActionText}>Work</Text>
+            </Pressable>
+          ) : null}
+          {rideHome.shortcuts.saved[0] ? (
+            <Pressable
+              style={styles.smallAction}
+              onPress={() =>
+                void loadRideOptions({
+                  title: "Saved",
+                  address: rideHome.shortcuts.saved[0]!.address,
+                  lat: rideHome.shortcuts.saved[0]!.lat,
+                  lng: rideHome.shortcuts.saved[0]!.lng,
+                })
+              }
+            >
+              <Text style={styles.smallActionText}>Saved</Text>
+            </Pressable>
+          ) : null}
+        </View>
+
+        {rideSearchResults?.results.map((result, index) => (
           <Pressable
-            key={store.id}
-            style={styles.templateStoreRowCard}
-            onPress={() => void openStore(store.id)}
+            key={`${result.address}-${index}`}
+            style={styles.infoCard}
+            onPress={() => void loadRideOptions(result)}
           >
-            <Image source={{ uri: store.imageUrl }} style={styles.templateStoreThumb} />
-            <View style={styles.templateStoreContent}>
-              <View style={styles.rowBetween}>
-                <Text style={styles.templateStoreName}>{store.name}</Text>
-                <View style={styles.templateRatingPill}>
-                  <MaterialCommunityIcons name="star" size={12} color="#111827" />
-                  <Text style={styles.templateRatingText}>{store.rating.toFixed(1)}</Text>
-                </View>
-              </View>
-              <Text numberOfLines={2} style={styles.templateStoreDesc}>
-                {store.description}
-              </Text>
-              <View style={styles.rowActions}>
-                <View style={styles.templateMetaPill}>
-                  <MaterialCommunityIcons name="clock-outline" size={12} color="#6B7280" />
-                  <Text style={styles.templateMetaText}>{store.etaMinutes} min</Text>
-                </View>
-                <View style={styles.templateMetaPill}>
-                  <MaterialCommunityIcons name="bike-fast" size={12} color="#6B7280" />
-                  <Text style={styles.templateMetaText}>{money(store.deliveryFee)}</Text>
-                </View>
-              </View>
-            </View>
+            <Text style={styles.infoCardTitle}>{result.title}</Text>
+            <Text style={styles.infoCardText}>{result.address}</Text>
           </Pressable>
         ))}
-        {filteredStores.length === 0 ? (
-          <View style={styles.emptyBox}>
-            <MaterialCommunityIcons
-              name="store-search-outline"
-              size={28}
-              color={templatePalette.primaryDark}
-            />
-            <Text style={styles.emptyBoxText}>
-              Aucun restaurant pour le moment. Cree un compte Admin, fais valider par Super
-              Admin, puis ajoute des produits.
+
+        <Text style={styles.sectionSubtitle}>Historique recent</Text>
+        {rideHome.recent.map((entry) => (
+          <View key={entry.id} style={styles.infoCard}>
+            <Text style={styles.infoCardTitle}>{entry.destination}</Text>
+            <Text style={styles.infoCardText}>
+              {entry.serviceType} · {entry.status} · {money(entry.amount)}
             </Text>
           </View>
-        ) : null}
+        ))}
       </ScrollView>
     );
   };
 
   const renderClientCart = () => (
     <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
-      <Text style={styles.sectionTitle}>Panier client</Text>
-      <Text style={styles.supportingText}>
-        {cartStore ? `${cartStore.name} · ${cartStore.category}` : "Panier vide"}
-      </Text>
-
-      {cartItems.length === 0 ? (
+      <Text style={styles.sectionTitle}>Selection du trajet & paiement</Text>
+      {!selectedDestination ? (
         <View style={styles.emptyBox}>
           <MaterialCommunityIcons
-            name="cart-outline"
+            name="car-estate"
             size={30}
             color={templatePalette.primaryDark}
           />
-          <Text style={styles.emptyBoxText}>Ajoutez des produits pour commander</Text>
+          <Text style={styles.emptyBoxText}>
+            Choisis d'abord une destination dans l'onglet Ride.
+          </Text>
         </View>
       ) : (
         <>
-          {cartItems.map((item) => (
-            <View key={item.product.id} style={styles.cartItemCard}>
-              <Image source={{ uri: item.product.imageUrl }} style={styles.cartItemImage} />
-              <View style={styles.cartItemContent}>
-                <Text style={styles.cartItemName}>{item.product.name}</Text>
-                <Text style={styles.cartItemPrice}>{money(item.product.price)}</Text>
+          <View style={styles.infoCard}>
+            <Text style={styles.infoCardTitle}>{selectedDestination.address}</Text>
+            <Text style={styles.infoCardText}>
+              Distance: {rideOptionsMeta?.distanceKm.toFixed(2) ?? "0.00"} km
+            </Text>
+          </View>
+
+          {rideOptions.map((option) => (
+            <Pressable
+              key={option.serviceType}
+              style={[
+                styles.infoCard,
+                selectedRideOption?.serviceType === option.serviceType
+                  ? styles.templateCategoryChipActive
+                  : null,
+              ]}
+              onPress={() => setSelectedRideOption(option)}
+            >
+              <View style={styles.rowBetween}>
+                <Text style={styles.infoCardTitle}>{option.label}</Text>
+                <Text style={styles.infoCardTitle}>{money(option.estimatedPrice)}</Text>
               </View>
-              <View style={styles.quantityControls}>
-                <Pressable
-                  style={styles.quantityButton}
-                  onPress={() => changeCartQuantity(item.product.id, -1)}
-                >
-                  <MaterialCommunityIcons name="minus" size={16} color="#1F2937" />
-                </Pressable>
-                <Text style={styles.quantityValue}>{item.quantity}</Text>
-                <Pressable
-                  style={styles.quantityButton}
-                  onPress={() => changeCartQuantity(item.product.id, 1)}
-                >
-                  <MaterialCommunityIcons name="plus" size={16} color="#1F2937" />
-                </Pressable>
-              </View>
-            </View>
+              <Text style={styles.infoCardText}>
+                ETA {option.etaMinutes} min · {option.seats} places
+              </Text>
+            </Pressable>
           ))}
 
-          <View style={styles.addressCard}>
-            <Text style={styles.addressTitle}>Adresse</Text>
+          <View style={styles.infoCard}>
+            <Text style={styles.infoCardTitle}>Moyen de paiement</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {(["CARD", "APPLE_PAY", "GOOGLE_PAY", "CASH"] as PaymentMethodType[]).map(
+                (method) => (
+                  <Pressable
+                    key={method}
+                    style={[
+                      styles.templateCategoryChip,
+                      selectedPaymentMethod === method
+                        ? styles.templateCategoryChipActive
+                        : null,
+                    ]}
+                    onPress={() => setSelectedPaymentMethod(method)}
+                  >
+                    <Text style={styles.templateCategoryText}>{method}</Text>
+                  </Pressable>
+                ),
+              )}
+            </ScrollView>
             <TextInput
-              value={addressText}
-              onChangeText={setAddressText}
-              placeholder="Adresse de livraison"
+              value={couponCode}
+              onChangeText={setCouponCode}
+              placeholder="Coupon / promo code"
               placeholderTextColor="#94A3B8"
-              style={styles.addressInput}
+              style={styles.authInput}
             />
-          </View>
-
-          <View style={styles.pricingCard}>
-            <View style={styles.rowBetween}>
-              <Text style={styles.pricingLabel}>Sous-total</Text>
-              <Text style={styles.pricingValue}>{money(cartSubtotal)}</Text>
-            </View>
-            <View style={styles.rowBetween}>
-              <Text style={styles.pricingLabel}>Livraison</Text>
-              <Text style={styles.pricingValue}>{money(cartDeliveryFee)}</Text>
-            </View>
-            <View style={styles.separator} />
-            <View style={styles.rowBetween}>
-              <Text style={styles.pricingTotalLabel}>Total</Text>
-              <Text style={styles.pricingTotalValue}>{money(cartTotal)}</Text>
+            <View style={styles.rowActions}>
+              <Pressable style={styles.smallAction} onPress={() => void requestRide()}>
+                <Text style={styles.smallActionText}>Confirmer trajet</Text>
+              </Pressable>
+              <Pressable style={styles.smallAction} onPress={() => void payForRide()}>
+                <Text style={styles.smallActionText}>Payer maintenant</Text>
+              </Pressable>
             </View>
           </View>
 
-          <Pressable
-            style={[
-              styles.checkoutButton,
-              processingCheckout ? styles.checkoutButtonDisabled : null,
-            ]}
-            onPress={() => void checkout()}
-            disabled={processingCheckout}
-          >
-            {processingCheckout ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.checkoutButtonText}>
-                Commander + paiement instantane
+          <Text style={styles.sectionSubtitle}>Historique trajets</Text>
+          {rideHistory.map((ride) => (
+            <Pressable
+              key={ride.id}
+              style={styles.infoCard}
+              onPress={() =>
+                void loadRideOptions({
+                  title: "Recommander",
+                  address: ride.destinationAddress,
+                  lat: ride.destinationLat,
+                  lng: ride.destinationLng,
+                })
+              }
+            >
+              <View style={styles.rowBetween}>
+                <Text style={styles.infoCardTitle}>{ride.destinationAddress}</Text>
+                <Text style={styles.infoCardText}>
+                  {money(ride.finalPrice ?? ride.estimatedPrice)}
+                </Text>
+              </View>
+              <Text style={styles.infoCardText}>
+                {ride.serviceType} · {ride.status} · {new Date(ride.createdAt).toLocaleString("fr-FR")}
               </Text>
-            )}
-          </Pressable>
+            </Pressable>
+          ))}
+          {paymentsHistory.slice(0, 8).map((payment) => (
+            <View key={payment.id} style={styles.infoCard}>
+              <Text style={styles.infoCardTitle}>Paiement {payment.provider}</Text>
+              <Text style={styles.infoCardText}>
+                {money(payment.amount)} · {payment.status}
+              </Text>
+              <Text style={styles.infoCardText}>
+                Facture: {payment.invoiceUrl ?? "en generation"}
+              </Text>
+            </View>
+          ))}
         </>
       )}
     </ScrollView>
@@ -1170,19 +1408,19 @@ export default function App() {
 
   const renderClientTracking = () => {
     const routePoints =
-      tracking !== null
+      activeRideTracking !== null
         ? [
             {
-              latitude: tracking.pickup.lat,
-              longitude: tracking.pickup.lng,
+              latitude: activeRideTracking.pickup.lat,
+              longitude: activeRideTracking.pickup.lng,
             },
             {
-              latitude: tracking.position.lat,
-              longitude: tracking.position.lng,
+              latitude: activeRideTracking.position.lat,
+              longitude: activeRideTracking.position.lng,
             },
             {
-              latitude: tracking.destination.lat,
-              longitude: tracking.destination.lng,
+              latitude: activeRideTracking.destination.lat,
+              longitude: activeRideTracking.destination.lng,
             },
           ]
         : [];
@@ -1190,26 +1428,28 @@ export default function App() {
 
     return (
       <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
-        <Text style={styles.sectionTitle}>Suivi commande</Text>
+        <Text style={styles.sectionTitle}>Chauffeur en route / Trajet en cours</Text>
 
-        {!orderId || !orderDetails || !tracking ? (
+        {!activeRide || !activeRideTracking ? (
           <View style={styles.emptyBox}>
             <MaterialCommunityIcons
-              name="map-marker-path"
+              name="car-connected"
               size={30}
               color={templatePalette.primaryDark}
             />
             <Text style={styles.emptyBoxText}>
-              Passez une commande pour activer le tracking.
+              Aucune course active. Cree une course depuis l'accueil.
             </Text>
           </View>
         ) : (
           <>
             <LinearGradient colors={["#FFF3C4", "#FFF7D6"]} style={styles.trackingHero}>
-              <Text style={styles.trackingStatus}>{orderDetails.statusLabel}</Text>
-              <Text style={styles.trackingEta}>Paiement: {orderDetails.paymentStatus}</Text>
-              <Text style={styles.trackingEta}>ETA {tracking.etaMinutes} min</Text>
-              <Text style={styles.trackingOrder}>#{orderDetails.id.slice(0, 8)}</Text>
+              <Text style={styles.trackingStatus}>{activeRide.status}</Text>
+              <Text style={styles.trackingEta}>ETA {activeRideTracking.etaMinutes} min</Text>
+              <Text style={styles.trackingEta}>
+                Vehicule: {activeRide.vehicleLabel ?? activeRideTracking.driver?.vehicle ?? "N/A"}
+              </Text>
+              <Text style={styles.trackingOrder}>#{activeRide.id.slice(0, 8)}</Text>
             </LinearGradient>
 
             <View style={styles.mapCard}>
@@ -1217,55 +1457,68 @@ export default function App() {
               <MapView style={styles.trackingMapView} initialRegion={trackingRegion}>
                 <Marker
                   coordinate={{
-                    latitude: tracking.pickup.lat,
-                    longitude: tracking.pickup.lng,
+                    latitude: activeRideTracking.pickup.lat,
+                    longitude: activeRideTracking.pickup.lng,
                   }}
-                  title={tracking.pickup.name}
+                  title="Pickup"
                   pinColor="#111827"
                 />
                 <Marker
                   coordinate={{
-                    latitude: tracking.destination.lat,
-                    longitude: tracking.destination.lng,
+                    latitude: activeRideTracking.destination.lat,
+                    longitude: activeRideTracking.destination.lng,
                   }}
-                  title={tracking.destination.text}
+                  title={activeRideTracking.destination.text}
                   pinColor={templatePalette.primaryDark}
                 />
                 <Marker
                   coordinate={{
-                    latitude: tracking.position.lat,
-                    longitude: tracking.position.lng,
+                    latitude: activeRideTracking.position.lat,
+                    longitude: activeRideTracking.position.lng,
                   }}
-                  title={tracking.courier?.name ?? "Livreur"}
-                  description={tracking.courier?.vehicle ?? "En route"}
+                  title={activeRideTracking.driver?.name ?? "Chauffeur"}
+                  description={activeRideTracking.driver?.vehicle ?? "En route"}
                   pinColor="#22C55E"
                 />
                 <Polyline coordinates={routePoints} strokeColor="#111827" strokeWidth={3} />
               </MapView>
-              <Text style={styles.mapCoordinate}>Depart: {tracking.pickup.name}</Text>
-              <Text style={styles.mapCoordinate}>Arrivee: {tracking.destination.text}</Text>
+              <Text style={styles.mapCoordinate}>Depart: {activeRideTracking.pickup.text}</Text>
+              <Text style={styles.mapCoordinate}>
+                Arrivee: {activeRideTracking.destination.text}
+              </Text>
             </View>
 
-            <Text style={styles.sectionSubtitle}>Timeline</Text>
-            {orderDetails.timeline.map((event) => (
-              <View key={event.id} style={styles.timelineItem}>
-                <View style={styles.timelineDot} />
-                <View>
-                  <Text style={styles.timelineLabel}>{event.label}</Text>
-                  <Text style={styles.timelineTimestamp}>
-                    {new Date(event.timestamp).toLocaleTimeString("fr-FR")}
-                  </Text>
-                </View>
-              </View>
-            ))}
-
-            {orderDetails.status !== "DELIVERED" &&
-            orderDetails.status !== "CANCELLED" &&
-            orderDetails.status !== "REFUSED" ? (
-              <Pressable style={styles.cancelButton} onPress={() => void cancelOrder()}>
-                <Text style={styles.cancelButtonText}>Annuler la commande</Text>
+            <View style={styles.rowActions}>
+              <Pressable style={styles.smallAction} onPress={() => setInfoMessage("Appel chauffeur (demo)")}>
+                <Text style={styles.smallActionText}>Appeler</Text>
               </Pressable>
-            ) : null}
+              <Pressable
+                style={styles.smallAction}
+                onPress={() => setInfoMessage("Message chauffeur envoye (demo)")}
+              >
+                <Text style={styles.smallActionText}>Message</Text>
+              </Pressable>
+              <Pressable style={styles.smallAction} onPress={() => setInfoMessage("Partage trajet actif")}>
+                <Text style={styles.smallActionText}>Partager</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.rowActions}>
+              <Pressable style={styles.smallAction} onPress={() => setInfoMessage("Support securite contacte")}>
+                <Text style={styles.smallActionText}>Securite</Text>
+              </Pressable>
+              <Pressable style={styles.smallAction} onPress={() => setActiveTab("profile")}>
+                <Text style={styles.smallActionText}>Support</Text>
+              </Pressable>
+            </View>
+
+            {(activeRide.status === "PENDING" ||
+              activeRide.status === "ACCEPTED" ||
+              activeRide.status === "ONGOING") && (
+              <Pressable style={styles.cancelButton} onPress={() => void cancelRideRequest()}>
+                <Text style={styles.cancelButtonText}>Annuler la course</Text>
+              </Pressable>
+            )}
           </>
         )}
       </ScrollView>
@@ -1761,7 +2014,77 @@ export default function App() {
         <Text style={styles.infoCardText}>{API_BASE_URL}</Text>
       </View>
 
-      <Pressable style={styles.secondaryButton} onPress={logout}>
+      {currentUser?.role === "CLIENT" ? (
+        <>
+          <View style={styles.infoCard}>
+            <Text style={styles.infoCardTitle}>Moyens paiement</Text>
+            {paymentMethods.length === 0 ? (
+              <Text style={styles.infoCardText}>Aucune carte enregistree</Text>
+            ) : (
+              paymentMethods.map((method) => (
+                <Text key={method.id} style={styles.infoCardText}>
+                  {method.type} · {method.label}
+                  {method.last4 ? ` · ****${method.last4}` : ""}
+                  {method.isDefault ? " (defaut)" : ""}
+                </Text>
+              ))
+            )}
+          </View>
+
+          <View style={styles.infoCard}>
+            <Text style={styles.infoCardTitle}>Securite / Langue / Notifications</Text>
+            <Text style={styles.infoCardText}>Langue: Francais</Text>
+            <Text style={styles.infoCardText}>
+              Notifications non lues: {notifications?.unread ?? 0}
+            </Text>
+            {notifications?.items.slice(0, 5).map((item) => (
+              <Pressable
+                key={item.id}
+                onPress={() => void api.markNotificationRead(item.id)}
+              >
+                <Text style={styles.infoCardText}>
+                  • {item.title} — {item.body}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          <View style={styles.infoCard}>
+            <Text style={styles.infoCardTitle}>Support</Text>
+            <TextInput
+              value={supportSubject}
+              onChangeText={setSupportSubject}
+              placeholder="Sujet du probleme"
+              placeholderTextColor="#94A3B8"
+              style={styles.authInput}
+            />
+            <TextInput
+              value={supportMessage}
+              onChangeText={setSupportMessage}
+              placeholder="Decris ton probleme"
+              placeholderTextColor="#94A3B8"
+              multiline
+              style={[styles.authInput, { minHeight: 80, textAlignVertical: "top" }]}
+            />
+            <Pressable style={styles.smallAction} onPress={() => void createSupportTicket()}>
+              <Text style={styles.smallActionText}>Signaler probleme</Text>
+            </Pressable>
+            {supportFaqs.map((faq) => (
+              <View key={faq.question} style={styles.separatorTop}>
+                <Text style={styles.infoCardTitle}>{faq.question}</Text>
+                <Text style={styles.infoCardText}>{faq.answer}</Text>
+              </View>
+            ))}
+            {supportTickets.slice(0, 3).map((ticket) => (
+              <Text key={ticket.id} style={styles.infoCardText}>
+                Ticket {ticket.subject} · {ticket.status}
+              </Text>
+            ))}
+          </View>
+        </>
+      ) : null}
+
+      <Pressable style={styles.secondaryButton} onPress={() => void logout()}>
         <Text style={styles.secondaryButtonText}>Se deconnecter</Text>
       </Pressable>
     </ScrollView>
@@ -1831,9 +2154,8 @@ export default function App() {
 
     if (currentUser.role === "CLIENT") {
       void refreshHome(true);
-      if (selectedStore?.id) {
-        void openStore(selectedStore.id);
-      }
+      void refreshRideContext();
+      void refreshActiveRide();
       return;
     }
 
@@ -2779,6 +3101,12 @@ const styles = StyleSheet.create({
   separator: {
     height: 1,
     backgroundColor: "#E2E8F0",
+  },
+  separatorTop: {
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+    paddingTop: 8,
+    marginTop: 8,
   },
   checkoutButton: {
     borderRadius: 14,

@@ -3,15 +3,23 @@ import jwt from "@fastify/jwt";
 import websocket from "@fastify/websocket";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import {
+  NotificationType,
   OrderStatus,
+  PaymentMethodType,
   PaymentStatus,
+  PaymentTransactionStatus,
   PrismaClient,
+  RideServiceType,
+  RideStatus,
+  SavedPlaceKind,
   type Prisma,
+  SupportTicketStatus,
   UserAccessStatus,
   UserRole,
 } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
+import crypto from "node:crypto";
 import { z } from "zod";
 
 type AuthTokenPayload = {
@@ -190,6 +198,84 @@ const livreurStatusSchema = z.object({
   ]),
 });
 
+const refreshTokenSchema = z.object({
+  refreshToken: z.string().min(20),
+});
+
+const oauthSchema = z.object({
+  providerToken: z.string().min(8),
+  email: z.string().trim().toLowerCase().email(),
+  name: z.string().trim().min(2).max(80),
+});
+
+const savedPlaceSchema = z.object({
+  label: z.string().trim().min(2).max(60),
+  kind: z.nativeEnum(SavedPlaceKind),
+  address: z.string().trim().min(3).max(160),
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+});
+
+const rideSearchQuerySchema = z.object({
+  query: z.string().trim().min(1).max(120),
+});
+
+const rideOptionsQuerySchema = z.object({
+  pickupLat: z.coerce.number().min(-90).max(90),
+  pickupLng: z.coerce.number().min(-180).max(180),
+  destinationLat: z.coerce.number().min(-90).max(90),
+  destinationLng: z.coerce.number().min(-180).max(180),
+});
+
+const createRideSchema = z.object({
+  pickupAddress: z.string().trim().min(3).max(160),
+  pickupLat: z.number().min(-90).max(90),
+  pickupLng: z.number().min(-180).max(180),
+  destinationAddress: z.string().trim().min(3).max(160),
+  destinationLat: z.number().min(-90).max(90),
+  destinationLng: z.number().min(-180).max(180),
+  serviceType: z.nativeEnum(RideServiceType),
+  paymentMethodType: z.nativeEnum(PaymentMethodType),
+  seats: z.number().int().min(1).max(8).default(4),
+  promoCode: z.string().trim().min(3).max(20).optional(),
+});
+
+const rideStatusPatchSchema = z.object({
+  status: z.enum([RideStatus.ACCEPTED, RideStatus.ONGOING, RideStatus.COMPLETED]),
+});
+
+const rideCancelSchema = z.object({
+  reason: z.string().trim().min(3).max(160).optional(),
+});
+
+const createPaymentMethodSchema = z.object({
+  type: z.nativeEnum(PaymentMethodType),
+  label: z.string().trim().min(2).max(80),
+  last4: z
+    .string()
+    .regex(/^\d{4}$/)
+    .optional(),
+  isDefault: z.boolean().optional(),
+});
+
+const payRideSchema = z.object({
+  methodType: z.nativeEnum(PaymentMethodType),
+  couponCode: z.string().trim().min(3).max(20).optional(),
+});
+
+const createSupportTicketSchema = z.object({
+  subject: z.string().trim().min(3).max(120),
+  message: z.string().trim().min(5).max(500),
+});
+
+const supportMessageSchema = z.object({
+  message: z.string().trim().min(1).max(500),
+});
+
+const adminUserStatusSchema = z.object({
+  accessStatus: z.nativeEnum(UserAccessStatus),
+});
+
 const orderDetailsInclude = {
   user: {
     select: {
@@ -235,6 +321,7 @@ type OrderWithTracking = Prisma.OrderGetPayload<{
 
 const orderSockets = new Map<string, Set<WsLike>>();
 const dashboardSockets = new Map<string, Set<WsLike>>();
+const rideSockets = new Map<string, Set<WsLike>>();
 
 function statusLabel(status: OrderStatus): string {
   switch (status) {
@@ -316,6 +403,22 @@ function publishDashboardRefresh(storeId: string, reason: string): void {
     sendSocket(socket, {
       type: "dashboard:refresh",
       storeId,
+      reason,
+      at: new Date().toISOString(),
+    });
+  }
+}
+
+function publishRideRefresh(rideId: string, reason: string): void {
+  const sockets = rideSockets.get(rideId);
+  if (!sockets) {
+    return;
+  }
+
+  for (const socket of sockets) {
+    sendSocket(socket, {
+      type: "ride:refresh",
+      rideId,
       reason,
       at: new Date().toISOString(),
     });
@@ -647,6 +750,236 @@ async function computeSuperAdminDashboard() {
   };
 }
 
+function createRefreshTokenValue(): string {
+  return crypto.randomBytes(40).toString("hex");
+}
+
+function hashRefreshToken(value: string): string {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+async function createSessionForUser(
+  userId: string,
+  request: FastifyRequest,
+): Promise<string> {
+  const refreshToken = createRefreshTokenValue();
+  const refreshTokenHash = hashRefreshToken(refreshToken);
+  const userAgent = request.headers["user-agent"] ?? null;
+  const ipAddress = request.ip ?? null;
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+  await prisma.authSession.create({
+    data: {
+      userId,
+      refreshTokenHash,
+      userAgent,
+      ipAddress,
+      expiresAt,
+    },
+  });
+
+  return refreshToken;
+}
+
+function toRadians(value: number): number {
+  return (value * Math.PI) / 180;
+}
+
+function calculateDistanceKm(
+  fromLat: number,
+  fromLng: number,
+  toLat: number,
+  toLng: number,
+): number {
+  const earthRadiusKm = 6371;
+  const dLat = toRadians(toLat - fromLat);
+  const dLng = toRadians(toLng - fromLng);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRadians(fromLat)) *
+      Math.cos(toRadians(toLat)) *
+      Math.sin(dLng / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusKm * c;
+}
+
+function rideServiceSnapshot(
+  serviceType: RideServiceType,
+  distanceKm: number,
+): {
+  serviceType: RideServiceType;
+  label: string;
+  etaMinutes: number;
+  seats: number;
+  estimatedPrice: number;
+} {
+  const configs: Record<
+    RideServiceType,
+    { label: string; baseFare: number; perKm: number; seats: number; eta: number }
+  > = {
+    [RideServiceType.UBER_X]: {
+      label: "UberX",
+      baseFare: 3.2,
+      perKm: 1.05,
+      seats: 4,
+      eta: 5,
+    },
+    [RideServiceType.COMFORT]: {
+      label: "Comfort",
+      baseFare: 4.3,
+      perKm: 1.3,
+      seats: 4,
+      eta: 6,
+    },
+    [RideServiceType.BLACK]: {
+      label: "Black",
+      baseFare: 8.5,
+      perKm: 2.1,
+      seats: 4,
+      eta: 8,
+    },
+    [RideServiceType.XL]: {
+      label: "XL",
+      baseFare: 6.3,
+      perKm: 1.6,
+      seats: 6,
+      eta: 7,
+    },
+  };
+
+  const selected = configs[serviceType];
+  const estimatedPrice = Number((selected.baseFare + distanceKm * selected.perKm).toFixed(2));
+  const etaMinutes = Math.max(3, Math.round(selected.eta + distanceKm * 0.9));
+
+  return {
+    serviceType,
+    label: selected.label,
+    etaMinutes,
+    seats: selected.seats,
+    estimatedPrice,
+  };
+}
+
+async function createUserNotification(input: {
+  userId: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  payloadJson?: string;
+}): Promise<void> {
+  await prisma.userNotification.create({
+    data: input,
+  });
+}
+
+function canAccessRide(
+  ride: {
+    passengerUserId: string;
+    driverUserId: string | null;
+  },
+  auth: AuthTokenPayload,
+): boolean {
+  if (auth.role === UserRole.SUPER_ADMIN) {
+    return true;
+  }
+
+  if (auth.role === UserRole.CLIENT) {
+    return ride.passengerUserId === auth.sub;
+  }
+
+  if (auth.role === UserRole.LIVREUR) {
+    return ride.driverUserId === auth.sub;
+  }
+
+  if (auth.role === UserRole.ADMIN) {
+    return true;
+  }
+
+  return false;
+}
+
+function serializeRideTracking(ride: {
+  id: string;
+  status: RideStatus;
+  pickupLat: number;
+  pickupLng: number;
+  destinationLat: number;
+  destinationLng: number;
+  pickupAddress: string;
+  destinationAddress: string;
+  etaMinutes: number;
+  driverName: string | null;
+  vehicleLabel: string | null;
+  createdAt: Date;
+  acceptedAt: Date | null;
+  startedAt: Date | null;
+}): {
+  rideId: string;
+  status: RideStatus;
+  etaMinutes: number;
+  pickup: { lat: number; lng: number; text: string };
+  destination: { lat: number; lng: number; text: string };
+  position: { lat: number; lng: number };
+  driver: { name: string; vehicle: string } | null;
+} {
+  let position = {
+    lat: ride.pickupLat,
+    lng: ride.pickupLng,
+  };
+
+  if (ride.status === RideStatus.ACCEPTED) {
+    const elapsed = ride.acceptedAt
+      ? (Date.now() - ride.acceptedAt.getTime()) / 60000
+      : (Date.now() - ride.createdAt.getTime()) / 60000;
+    const t = Math.min(1, Math.max(0, elapsed / Math.max(1, ride.etaMinutes)));
+    position = {
+      lat: ride.pickupLat + (ride.destinationLat - ride.pickupLat) * t * 0.35,
+      lng: ride.pickupLng + (ride.destinationLng - ride.pickupLng) * t * 0.35,
+    };
+  } else if (ride.status === RideStatus.ONGOING) {
+    const elapsed = ride.startedAt
+      ? (Date.now() - ride.startedAt.getTime()) / 60000
+      : 0;
+    const t = Math.min(1, Math.max(0, elapsed / Math.max(1, ride.etaMinutes)));
+    position = {
+      lat: ride.pickupLat + (ride.destinationLat - ride.pickupLat) * t,
+      lng: ride.pickupLng + (ride.destinationLng - ride.pickupLng) * t,
+    };
+  } else if (ride.status === RideStatus.COMPLETED) {
+    position = {
+      lat: ride.destinationLat,
+      lng: ride.destinationLng,
+    };
+  }
+
+  return {
+    rideId: ride.id,
+    status: ride.status,
+    etaMinutes:
+      ride.status === RideStatus.COMPLETED || ride.status === RideStatus.CANCELLED
+        ? 0
+        : ride.etaMinutes,
+    pickup: {
+      lat: ride.pickupLat,
+      lng: ride.pickupLng,
+      text: ride.pickupAddress,
+    },
+    destination: {
+      lat: ride.destinationLat,
+      lng: ride.destinationLng,
+      text: ride.destinationAddress,
+    },
+    position,
+    driver:
+      ride.driverName && ride.vehicleLabel
+        ? {
+            name: ride.driverName,
+            vehicle: ride.vehicleLabel,
+          }
+        : null,
+  };
+}
+
 async function getOrderAccessMeta(orderId: string) {
   return prisma.order.findUnique({
     where: { id: orderId },
@@ -953,6 +1286,8 @@ app.post("/auth/guest", async (request, reply) => {
     },
   });
 
+  const refreshToken = await createSessionForUser(user.id, request);
+
   return reply.status(201).send({
     token: signUserToken({
       id: user.id,
@@ -961,6 +1296,7 @@ app.post("/auth/guest", async (request, reply) => {
       email: user.email,
       name: user.name,
     }),
+    refreshToken,
     requiresApproval: false,
     message: "Session invite creee",
     user: sanitizeUser(user),
@@ -1006,9 +1342,14 @@ app.post("/auth/register", async (request, reply) => {
           name: user.name,
         })
       : null;
+  const refreshToken =
+    accessStatus === UserAccessStatus.ACTIVE
+      ? await createSessionForUser(user.id, request)
+      : null;
 
   return reply.status(201).send({
     token,
+    refreshToken,
     requiresApproval: accessStatus !== UserAccessStatus.ACTIVE,
     message:
       accessStatus === UserAccessStatus.ACTIVE
@@ -1048,6 +1389,8 @@ app.post("/auth/login", async (request, reply) => {
     });
   }
 
+  const refreshToken = await createSessionForUser(user.id, request);
+
   return {
     token: signUserToken({
       id: user.id,
@@ -1056,10 +1399,163 @@ app.post("/auth/login", async (request, reply) => {
       email: user.email,
       name: user.name,
     }),
+    refreshToken,
     requiresApproval: false,
     message: "Connexion reussie",
     user: sanitizeUser(user),
   };
+});
+
+app.post("/auth/refresh", async (request, reply) => {
+  const body = refreshTokenSchema.parse(request.body);
+  const refreshTokenHash = hashRefreshToken(body.refreshToken);
+
+  const session = await prisma.authSession.findFirst({
+    where: {
+      refreshTokenHash,
+      revokedAt: null,
+      expiresAt: { gt: new Date() },
+    },
+    include: {
+      user: true,
+    },
+  });
+
+  if (!session) {
+    return reply.status(401).send({ message: "Invalid refresh token" });
+  }
+
+  if (session.user.accessStatus !== UserAccessStatus.ACTIVE) {
+    return reply.status(403).send({
+      message: "Votre acces est bloque. Contactez le Super Admin.",
+      user: sanitizeUser(session.user),
+    });
+  }
+
+  const newRefreshToken = createRefreshTokenValue();
+  const newRefreshTokenHash = hashRefreshToken(newRefreshToken);
+  const userAgent = request.headers["user-agent"] ?? null;
+  const ipAddress = request.ip ?? null;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.authSession.update({
+      where: { id: session.id },
+      data: {
+        revokedAt: new Date(),
+        lastUsedAt: new Date(),
+      },
+    });
+
+    await tx.authSession.create({
+      data: {
+        userId: session.user.id,
+        refreshTokenHash: newRefreshTokenHash,
+        userAgent,
+        ipAddress,
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      },
+    });
+  });
+
+  return {
+    token: signUserToken({
+      id: session.user.id,
+      role: session.user.role,
+      accessStatus: session.user.accessStatus,
+      email: session.user.email,
+      name: session.user.name,
+    }),
+    refreshToken: newRefreshToken,
+    requiresApproval: false,
+    message: "Token renouvele",
+    user: sanitizeUser(session.user),
+  };
+});
+
+app.post("/auth/logout", async (request, reply) => {
+  const body = refreshTokenSchema.parse(request.body);
+  const refreshTokenHash = hashRefreshToken(body.refreshToken);
+
+  await prisma.authSession.updateMany({
+    where: {
+      refreshTokenHash,
+      revokedAt: null,
+    },
+    data: {
+      revokedAt: new Date(),
+      lastUsedAt: new Date(),
+    },
+  });
+
+  return { success: true };
+});
+
+app.post("/auth/oauth/google", async (request, reply) => {
+  const body = oauthSchema.parse(request.body);
+
+  const user = await prisma.user.upsert({
+    where: { email: body.email },
+    update: {
+      name: body.name,
+      accessStatus: UserAccessStatus.ACTIVE,
+    },
+    create: {
+      name: body.name,
+      email: body.email,
+      role: UserRole.CLIENT,
+      accessStatus: UserAccessStatus.ACTIVE,
+    },
+  });
+
+  const refreshToken = await createSessionForUser(user.id, request);
+
+  return reply.send({
+    token: signUserToken({
+      id: user.id,
+      role: user.role,
+      accessStatus: user.accessStatus,
+      email: user.email,
+      name: user.name,
+    }),
+    refreshToken,
+    requiresApproval: false,
+    message: "Connexion Google simulee reussie",
+    user: sanitizeUser(user),
+  });
+});
+
+app.post("/auth/oauth/apple", async (request, reply) => {
+  const body = oauthSchema.parse(request.body);
+
+  const user = await prisma.user.upsert({
+    where: { email: body.email },
+    update: {
+      name: body.name,
+      accessStatus: UserAccessStatus.ACTIVE,
+    },
+    create: {
+      name: body.name,
+      email: body.email,
+      role: UserRole.CLIENT,
+      accessStatus: UserAccessStatus.ACTIVE,
+    },
+  });
+
+  const refreshToken = await createSessionForUser(user.id, request);
+
+  return reply.send({
+    token: signUserToken({
+      id: user.id,
+      role: user.role,
+      accessStatus: user.accessStatus,
+      email: user.email,
+      name: user.name,
+    }),
+    refreshToken,
+    requiresApproval: false,
+    message: "Connexion Apple simulee reussie",
+    user: sanitizeUser(user),
+  });
 });
 
 app.get("/auth/me", async (request, reply) => {
@@ -1089,6 +1585,1172 @@ app.get("/auth/me", async (request, reply) => {
     user: sanitizeUser(user),
     managedStore: user.managedStore,
     courierProfile: user.courierProfile,
+  };
+});
+
+app.get("/rides/home", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+    ensureRole(auth, [UserRole.CLIENT]);
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const [savedPlaces, recentRides] = await Promise.all([
+    prisma.savedPlace.findMany({
+      where: { userId: auth.sub },
+      orderBy: [{ kind: "asc" }, { updatedAt: "desc" }],
+      take: 8,
+    }),
+    prisma.ride.findMany({
+      where: { passengerUserId: auth.sub },
+      orderBy: { createdAt: "desc" },
+      take: 8,
+      select: {
+        id: true,
+        destinationAddress: true,
+        finalPrice: true,
+        estimatedPrice: true,
+        status: true,
+        createdAt: true,
+        serviceType: true,
+      },
+    }),
+  ]);
+
+  const homePlace = savedPlaces.find((place) => place.kind === SavedPlaceKind.HOME) ?? null;
+  const workPlace = savedPlaces.find((place) => place.kind === SavedPlaceKind.WORK) ?? null;
+  const saved = savedPlaces.filter((place) => place.kind === SavedPlaceKind.SAVED);
+
+  return {
+    whereToLabel: "Where to?",
+    userLocation: {
+      lat: homePlace?.lat ?? 36.8065,
+      lng: homePlace?.lng ?? 10.1815,
+      address: homePlace?.address ?? "Position actuelle",
+    },
+    quickSuggestions: [
+      "Aeroport Tunis-Carthage",
+      "Centre Ville",
+      "Lac 2",
+      "La Marsa",
+    ],
+    recent: recentRides.map((ride) => ({
+      id: ride.id,
+      destination: ride.destinationAddress,
+      status: ride.status,
+      serviceType: ride.serviceType,
+      amount: ride.finalPrice ?? ride.estimatedPrice,
+      createdAt: ride.createdAt,
+    })),
+    shortcuts: {
+      home: homePlace,
+      work: workPlace,
+      saved,
+    },
+  };
+});
+
+app.get("/rides/search", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const query = rideSearchQuerySchema.parse(request.query).query.toLowerCase();
+
+  const staticPlaces = [
+    { title: "Aeroport Tunis-Carthage", address: "Aeroport Tunis-Carthage", lat: 36.851, lng: 10.227 },
+    { title: "Avenue Habib Bourguiba", address: "Centre Ville, Tunis", lat: 36.8015, lng: 10.1795 },
+    { title: "La Marsa Plage", address: "La Marsa, Tunis", lat: 36.877, lng: 10.334 },
+    { title: "Sidi Bou Said", address: "Sidi Bou Said", lat: 36.871, lng: 10.341 },
+    { title: "Lac 2", address: "Berges du Lac 2", lat: 36.845, lng: 10.269 },
+  ];
+
+  const [savedPlaces, recentRides] = await Promise.all([
+    prisma.savedPlace.findMany({
+      where: { userId: auth.sub },
+      orderBy: { updatedAt: "desc" },
+      take: 12,
+    }),
+    prisma.ride.findMany({
+      where: { passengerUserId: auth.sub },
+      orderBy: { createdAt: "desc" },
+      take: 12,
+      select: {
+        destinationAddress: true,
+        destinationLat: true,
+        destinationLng: true,
+      },
+    }),
+  ]);
+
+  const matches = [
+    ...staticPlaces,
+    ...savedPlaces.map((place) => ({
+      title: place.label,
+      address: place.address,
+      lat: place.lat,
+      lng: place.lng,
+    })),
+    ...recentRides.map((ride) => ({
+      title: "Recent",
+      address: ride.destinationAddress,
+      lat: ride.destinationLat,
+      lng: ride.destinationLng,
+    })),
+  ].filter((entry) => {
+    const hay = `${entry.title} ${entry.address}`.toLowerCase();
+    return hay.includes(query);
+  });
+
+  return {
+    query,
+    results: matches.slice(0, 15),
+    favorites: savedPlaces.map((place) => ({
+      id: place.id,
+      label: place.label,
+      kind: place.kind,
+      address: place.address,
+      lat: place.lat,
+      lng: place.lng,
+    })),
+    recent: recentRides,
+  };
+});
+
+app.get("/rides/options", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+    ensureRole(auth, [UserRole.CLIENT]);
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const query = rideOptionsQuerySchema.parse(request.query);
+  const distanceKm = Number(
+    calculateDistanceKm(
+      query.pickupLat,
+      query.pickupLng,
+      query.destinationLat,
+      query.destinationLng,
+    ).toFixed(2),
+  );
+
+  const options = [
+    rideServiceSnapshot(RideServiceType.UBER_X, distanceKm),
+    rideServiceSnapshot(RideServiceType.COMFORT, distanceKm),
+    rideServiceSnapshot(RideServiceType.BLACK, distanceKm),
+    rideServiceSnapshot(RideServiceType.XL, distanceKm),
+  ];
+
+  return {
+    distanceKm,
+    options,
+    paymentMethods: Object.values(PaymentMethodType),
+  };
+});
+
+app.post("/rides/saved-places", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const body = savedPlaceSchema.parse(request.body);
+  const place = await prisma.savedPlace.create({
+    data: {
+      userId: auth.sub,
+      ...body,
+    },
+  });
+
+  return reply.status(201).send(place);
+});
+
+app.get("/rides/history", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const rides = await prisma.ride.findMany({
+    where:
+      auth.role === UserRole.CLIENT
+        ? { passengerUserId: auth.sub }
+        : auth.role === UserRole.LIVREUR
+          ? { driverUserId: auth.sub }
+          : undefined,
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+
+  return rides;
+});
+
+app.post("/rides", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+    ensureRole(auth, [UserRole.CLIENT]);
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const body = createRideSchema.parse(request.body);
+  const distanceKm = Number(
+    calculateDistanceKm(
+      body.pickupLat,
+      body.pickupLng,
+      body.destinationLat,
+      body.destinationLng,
+    ).toFixed(2),
+  );
+  const serviceSnapshot = rideServiceSnapshot(body.serviceType, distanceKm);
+
+  const candidateCouriers = await prisma.courier.findMany({
+    where: {
+      isAvailable: true,
+      user: {
+        role: UserRole.LIVREUR,
+        accessStatus: UserAccessStatus.ACTIVE,
+      },
+    },
+    include: {
+      user: true,
+    },
+    take: 30,
+  });
+
+  const selectedCourier =
+    candidateCouriers
+      .map((courier) => ({
+        courier,
+        distance: calculateDistanceKm(
+          body.pickupLat,
+          body.pickupLng,
+          courier.lat,
+          courier.lng,
+        ),
+      }))
+      .sort((a, b) => a.distance - b.distance)[0]?.courier ?? null;
+
+  const ride = await prisma.$transaction(async (tx) => {
+    const created = await tx.ride.create({
+      data: {
+        passengerUserId: auth.sub,
+        driverUserId: selectedCourier?.userId ?? null,
+        status: selectedCourier ? RideStatus.ACCEPTED : RideStatus.PENDING,
+        serviceType: body.serviceType,
+        paymentMethodType: body.paymentMethodType,
+        pickupAddress: body.pickupAddress,
+        pickupLat: body.pickupLat,
+        pickupLng: body.pickupLng,
+        destinationAddress: body.destinationAddress,
+        destinationLat: body.destinationLat,
+        destinationLng: body.destinationLng,
+        seats: body.seats,
+        etaMinutes: serviceSnapshot.etaMinutes,
+        distanceKm,
+        estimatedPrice: serviceSnapshot.estimatedPrice,
+        promoCode: body.promoCode,
+        driverName: selectedCourier?.name ?? null,
+        driverPhotoUrl:
+          selectedCourier?.user?.email
+            ? `https://api.dicebear.com/8.x/initials/svg?seed=${encodeURIComponent(
+                selectedCourier.user.email,
+              )}`
+            : null,
+        vehicleLabel: selectedCourier?.vehicle ?? null,
+        vehiclePlate: selectedCourier ? `TN-${Math.floor(Math.random() * 9000 + 1000)}` : null,
+        acceptedAt: selectedCourier ? new Date() : null,
+        events: {
+          create: [
+            {
+              status: RideStatus.PENDING,
+              label: "Demande de course envoyee",
+              lat: body.pickupLat,
+              lng: body.pickupLng,
+            },
+            ...(selectedCourier
+              ? [
+                  {
+                    status: RideStatus.ACCEPTED,
+                    label: "Chauffeur assigne",
+                    lat: selectedCourier.lat,
+                    lng: selectedCourier.lng,
+                  },
+                ]
+              : []),
+          ],
+        },
+      },
+      include: {
+        passengerUser: {
+          select: { id: true, name: true, email: true },
+        },
+        driverUser: {
+          select: { id: true, name: true, email: true },
+        },
+      },
+    });
+
+    if (selectedCourier) {
+      await tx.courier.update({
+        where: { id: selectedCourier.id },
+        data: { isAvailable: false },
+      });
+    }
+
+    return created;
+  });
+
+  await createUserNotification({
+    userId: auth.sub,
+    type: NotificationType.RIDE_STATUS,
+    title: selectedCourier ? "Chauffeur assigne" : "Recherche chauffeur",
+    body: selectedCourier
+      ? `${ride.driverName ?? "Votre chauffeur"} arrive dans ${ride.etaMinutes} min`
+      : "Nous recherchons un chauffeur disponible",
+    payloadJson: JSON.stringify({ rideId: ride.id }),
+  });
+
+  if (ride.driverUserId) {
+    await createUserNotification({
+      userId: ride.driverUserId,
+      type: NotificationType.RIDE_STATUS,
+      title: "Nouvelle course",
+      body: `Nouveau trajet vers ${ride.destinationAddress}`,
+      payloadJson: JSON.stringify({ rideId: ride.id }),
+    });
+  }
+
+  publishRideRefresh(ride.id, "ride_created");
+  return reply.status(201).send(ride);
+});
+
+app.get("/rides/:rideId", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const params = z.object({ rideId: z.string().cuid() }).parse(request.params);
+  const ride = await prisma.ride.findUnique({
+    where: { id: params.rideId },
+    include: {
+      events: {
+        orderBy: { createdAt: "asc" },
+      },
+      passengerUser: {
+        select: { id: true, name: true, email: true },
+      },
+      driverUser: {
+        select: { id: true, name: true, email: true },
+      },
+    },
+  });
+
+  if (!ride) {
+    return reply.status(404).send({ message: "Ride not found" });
+  }
+
+  if (!canAccessRide(ride, auth)) {
+    return reply.status(403).send({ message: "Forbidden" });
+  }
+
+  return ride;
+});
+
+app.get("/rides/:rideId/tracking", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const params = z.object({ rideId: z.string().cuid() }).parse(request.params);
+  const ride = await prisma.ride.findUnique({
+    where: { id: params.rideId },
+    select: {
+      id: true,
+      status: true,
+      pickupLat: true,
+      pickupLng: true,
+      pickupAddress: true,
+      destinationLat: true,
+      destinationLng: true,
+      destinationAddress: true,
+      etaMinutes: true,
+      driverName: true,
+      vehicleLabel: true,
+      createdAt: true,
+      acceptedAt: true,
+      startedAt: true,
+      passengerUserId: true,
+      driverUserId: true,
+    },
+  });
+
+  if (!ride) {
+    return reply.status(404).send({ message: "Ride not found" });
+  }
+
+  if (!canAccessRide(ride, auth)) {
+    return reply.status(403).send({ message: "Forbidden" });
+  }
+
+  return serializeRideTracking(ride);
+});
+
+app.patch("/rides/:rideId/cancel", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const params = z.object({ rideId: z.string().cuid() }).parse(request.params);
+  const body = rideCancelSchema.parse(request.body ?? {});
+  const ride = await prisma.ride.findUnique({
+    where: { id: params.rideId },
+    select: {
+      id: true,
+      status: true,
+      passengerUserId: true,
+      driverUserId: true,
+    },
+  });
+
+  if (!ride) {
+    return reply.status(404).send({ message: "Ride not found" });
+  }
+
+  if (!canAccessRide(ride, auth)) {
+    return reply.status(403).send({ message: "Forbidden" });
+  }
+
+  if (
+    ride.status === RideStatus.COMPLETED ||
+    ride.status === RideStatus.CANCELLED
+  ) {
+    return reply.status(400).send({ message: "Ride already finished" });
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.ride.update({
+      where: { id: ride.id },
+      data: {
+        status: RideStatus.CANCELLED,
+        cancelledAt: new Date(),
+      },
+    });
+    await tx.rideEvent.create({
+      data: {
+        rideId: ride.id,
+        status: RideStatus.CANCELLED,
+        label: body.reason ?? "Course annulee",
+      },
+    });
+
+    if (ride.driverUserId) {
+      await tx.courier.updateMany({
+        where: { userId: ride.driverUserId },
+        data: { isAvailable: true },
+      });
+    }
+  });
+
+  publishRideRefresh(ride.id, "ride_cancelled");
+  return { id: ride.id, status: RideStatus.CANCELLED };
+});
+
+app.patch("/rides/:rideId/driver/status", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+    ensureRole(auth, [UserRole.LIVREUR]);
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const params = z.object({ rideId: z.string().cuid() }).parse(request.params);
+  const body = rideStatusPatchSchema.parse(request.body);
+
+  const ride = await prisma.ride.findUnique({
+    where: { id: params.rideId },
+  });
+  if (!ride) {
+    return reply.status(404).send({ message: "Ride not found" });
+  }
+
+  if (ride.driverUserId !== auth.sub) {
+    return reply.status(403).send({ message: "Ride not assigned to this driver" });
+  }
+
+  const validTransition =
+    (ride.status === RideStatus.PENDING && body.status === RideStatus.ACCEPTED) ||
+    (ride.status === RideStatus.ACCEPTED && body.status === RideStatus.ONGOING) ||
+    (ride.status === RideStatus.ONGOING && body.status === RideStatus.COMPLETED);
+
+  if (!validTransition) {
+    return reply.status(400).send({ message: "Invalid ride status transition" });
+  }
+
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    await tx.ride.update({
+      where: { id: ride.id },
+      data: {
+        status: body.status,
+        acceptedAt: body.status === RideStatus.ACCEPTED ? now : ride.acceptedAt,
+        startedAt: body.status === RideStatus.ONGOING ? now : ride.startedAt,
+        completedAt: body.status === RideStatus.COMPLETED ? now : ride.completedAt,
+        finalPrice:
+          body.status === RideStatus.COMPLETED
+            ? Number((ride.finalPrice ?? ride.estimatedPrice).toFixed(2))
+            : ride.finalPrice,
+      },
+    });
+
+    await tx.rideEvent.create({
+      data: {
+        rideId: ride.id,
+        status: body.status,
+        label:
+          body.status === RideStatus.ACCEPTED
+            ? "Chauffeur en route"
+            : body.status === RideStatus.ONGOING
+              ? "Trajet en cours"
+              : "Trajet termine",
+      },
+    });
+
+    if (body.status === RideStatus.COMPLETED) {
+      await tx.courier.updateMany({
+        where: { userId: auth.sub },
+        data: { isAvailable: true },
+      });
+    }
+  });
+
+  await createUserNotification({
+    userId: ride.passengerUserId,
+    type: NotificationType.RIDE_STATUS,
+    title:
+      body.status === RideStatus.ACCEPTED
+        ? "Chauffeur arrive bientot"
+        : body.status === RideStatus.ONGOING
+          ? "Trajet demarre"
+          : "Trajet termine",
+    body:
+      body.status === RideStatus.ACCEPTED
+        ? "Votre chauffeur est en route."
+        : body.status === RideStatus.ONGOING
+          ? "Votre course est en cours."
+          : "Merci d'avoir voyage avec nous.",
+    payloadJson: JSON.stringify({ rideId: ride.id }),
+  });
+
+  publishRideRefresh(ride.id, "driver_status_update");
+  return { id: ride.id, status: body.status };
+});
+
+app.get("/payments/methods", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const methods = await prisma.paymentMethod.findMany({
+    where: { userId: auth.sub },
+    orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
+  });
+
+  return methods;
+});
+
+app.post("/payments/methods", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const body = createPaymentMethodSchema.parse(request.body);
+  const method = await prisma.$transaction(async (tx) => {
+    if (body.isDefault) {
+      await tx.paymentMethod.updateMany({
+        where: { userId: auth.sub, isDefault: true },
+        data: { isDefault: false },
+      });
+    }
+    return tx.paymentMethod.create({
+      data: {
+        userId: auth.sub,
+        type: body.type,
+        label: body.label,
+        last4: body.last4,
+        isDefault: body.isDefault ?? false,
+      },
+    });
+  });
+
+  return reply.status(201).send(method);
+});
+
+app.post("/rides/:rideId/pay", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const params = z.object({ rideId: z.string().cuid() }).parse(request.params);
+  const body = payRideSchema.parse(request.body);
+
+  const ride = await prisma.ride.findUnique({
+    where: { id: params.rideId },
+  });
+  if (!ride) {
+    return reply.status(404).send({ message: "Ride not found" });
+  }
+  if (ride.passengerUserId !== auth.sub && auth.role !== UserRole.SUPER_ADMIN) {
+    return reply.status(403).send({ message: "Forbidden" });
+  }
+
+  const existing = await prisma.paymentTransaction.findFirst({
+    where: { rideId: ride.id, status: PaymentTransactionStatus.PAID },
+  });
+  if (existing) {
+    return {
+      paymentId: existing.id,
+      rideId: ride.id,
+      amount: existing.amount,
+      status: existing.status,
+      invoiceUrl: existing.invoiceUrl,
+    };
+  }
+
+  const couponDiscounts: Record<string, number> = {
+    SAVE10: 0.1,
+    FIRST20: 0.2,
+  };
+  const rawPrice = ride.finalPrice ?? ride.estimatedPrice;
+  const discountRate = body.couponCode
+    ? couponDiscounts[body.couponCode.toUpperCase()] ?? 0
+    : 0;
+  const amount = Number((rawPrice * (1 - discountRate)).toFixed(2));
+  const providerRef = `pay_${Math.random().toString(36).slice(2, 12)}`;
+  const invoiceUrl = `https://example.com/invoices/${ride.id}.pdf`;
+
+  const payment = await prisma.paymentTransaction.create({
+    data: {
+      userId: auth.sub,
+      rideId: ride.id,
+      amount,
+      currency: ride.currency,
+      provider: body.methodType,
+      status: PaymentTransactionStatus.PAID,
+      providerRef,
+      paidAt: new Date(),
+      invoiceUrl,
+    },
+  });
+
+  await prisma.ride.update({
+    where: { id: ride.id },
+    data: {
+      finalPrice: amount,
+      paymentMethodType: body.methodType,
+      promoCode: body.couponCode ?? ride.promoCode,
+    },
+  });
+
+  return {
+    paymentId: payment.id,
+    rideId: ride.id,
+    amount: payment.amount,
+    status: payment.status,
+    invoiceUrl: payment.invoiceUrl,
+  };
+});
+
+app.get("/rides/:rideId/invoice", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const params = z.object({ rideId: z.string().cuid() }).parse(request.params);
+  const ride = await prisma.ride.findUnique({
+    where: { id: params.rideId },
+    select: {
+      id: true,
+      passengerUserId: true,
+    },
+  });
+  if (!ride) {
+    return reply.status(404).send({ message: "Ride not found" });
+  }
+  if (ride.passengerUserId !== auth.sub && auth.role !== UserRole.SUPER_ADMIN) {
+    return reply.status(403).send({ message: "Forbidden" });
+  }
+
+  const payment = await prisma.paymentTransaction.findFirst({
+    where: { rideId: ride.id },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!payment) {
+    return reply.status(404).send({ message: "Invoice not found" });
+  }
+
+  return {
+    rideId: ride.id,
+    paymentId: payment.id,
+    amount: payment.amount,
+    currency: payment.currency,
+    invoiceUrl: payment.invoiceUrl,
+    paidAt: payment.paidAt,
+  };
+});
+
+app.get("/payments/history", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  return prisma.paymentTransaction.findMany({
+    where:
+      auth.role === UserRole.SUPER_ADMIN ? undefined : { userId: auth.sub },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+});
+
+app.get("/notifications", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const notifications = await prisma.userNotification.findMany({
+    where: { userId: auth.sub },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+
+  const unread = notifications.filter((item) => !item.readAt).length;
+  return { unread, items: notifications };
+});
+
+app.patch("/notifications/:notificationId/read", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const params = z
+    .object({ notificationId: z.string().cuid() })
+    .parse(request.params);
+  const updated = await prisma.userNotification.updateMany({
+    where: {
+      id: params.notificationId,
+      userId: auth.sub,
+      readAt: null,
+    },
+    data: {
+      readAt: new Date(),
+    },
+  });
+
+  return { success: updated.count > 0 };
+});
+
+app.get("/support/faqs", async () => {
+  return [
+    {
+      question: "Comment annuler une course ?",
+      answer: "Ouvrez votre trajet en cours puis cliquez sur Annuler course.",
+    },
+    {
+      question: "Comment payer en cash ?",
+      answer: "Choisissez CASH dans l'ecran de paiement avant de confirmer.",
+    },
+    {
+      question: "Comment signaler un probleme ?",
+      answer: "Utilisez Support > Signaler un probleme pour ouvrir un ticket.",
+    },
+  ];
+});
+
+app.post("/support/tickets", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const body = createSupportTicketSchema.parse(request.body);
+  const ticket = await prisma.supportTicket.create({
+    data: {
+      userId: auth.sub,
+      subject: body.subject,
+      status: SupportTicketStatus.OPEN,
+      messages: {
+        create: {
+          senderRole: auth.role,
+          message: body.message,
+        },
+      },
+    },
+    include: {
+      messages: {
+        orderBy: { createdAt: "asc" },
+      },
+    },
+  });
+
+  return reply.status(201).send(ticket);
+});
+
+app.get("/support/tickets/me", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const tickets = await prisma.supportTicket.findMany({
+    where: auth.role === UserRole.SUPER_ADMIN ? undefined : { userId: auth.sub },
+    include: {
+      messages: {
+        orderBy: { createdAt: "asc" },
+      },
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+
+  return tickets;
+});
+
+app.post("/support/tickets/:ticketId/messages", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const params = z.object({ ticketId: z.string().cuid() }).parse(request.params);
+  const body = supportMessageSchema.parse(request.body);
+
+  const ticket = await prisma.supportTicket.findUnique({
+    where: { id: params.ticketId },
+  });
+  if (!ticket) {
+    return reply.status(404).send({ message: "Ticket not found" });
+  }
+  if (ticket.userId !== auth.sub && auth.role !== UserRole.SUPER_ADMIN) {
+    return reply.status(403).send({ message: "Forbidden" });
+  }
+
+  const message = await prisma.supportMessage.create({
+    data: {
+      ticketId: ticket.id,
+      senderRole: auth.role,
+      message: body.message,
+    },
+  });
+
+  if (auth.role !== UserRole.SUPER_ADMIN) {
+    await prisma.supportTicket.update({
+      where: { id: ticket.id },
+      data: { status: SupportTicketStatus.IN_PROGRESS },
+    });
+  }
+
+  return reply.status(201).send(message);
+});
+
+app.get("/super-admin/users", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+    ensureRole(auth, [UserRole.SUPER_ADMIN]);
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  return prisma.user.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 200,
+  });
+});
+
+app.patch("/super-admin/users/:userId/access-status", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+    ensureRole(auth, [UserRole.SUPER_ADMIN]);
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const params = z.object({ userId: z.string().cuid() }).parse(request.params);
+  const body = adminUserStatusSchema.parse(request.body);
+
+  const user = await prisma.user.update({
+    where: { id: params.userId },
+    data: { accessStatus: body.accessStatus },
+  });
+
+  return sanitizeUser(user);
+});
+
+app.get("/super-admin/analytics", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+    ensureRole(auth, [UserRole.SUPER_ADMIN]);
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const today = startOfDay();
+  const [ridesToday, ridesCompleted, ridesCancelled, usersActive, paymentsToday] =
+    await Promise.all([
+      prisma.ride.count({ where: { createdAt: { gte: today } } }),
+      prisma.ride.count({ where: { status: RideStatus.COMPLETED, createdAt: { gte: today } } }),
+      prisma.ride.count({ where: { status: RideStatus.CANCELLED, createdAt: { gte: today } } }),
+      prisma.user.count({ where: { accessStatus: UserAccessStatus.ACTIVE } }),
+      prisma.paymentTransaction.aggregate({
+        _sum: { amount: true },
+        where: { createdAt: { gte: today }, status: PaymentTransactionStatus.PAID },
+      }),
+    ]);
+
+  return {
+    ridesToday,
+    ridesCompleted,
+    ridesCancelled,
+    usersActive,
+    paymentsToday: Number((paymentsToday._sum.amount ?? 0).toFixed(2)),
+  };
+});
+
+app.get("/super-admin/logs", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+    ensureRole(auth, [UserRole.SUPER_ADMIN]);
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const [latestRideEvents, latestOrderEvents] = await Promise.all([
+    prisma.rideEvent.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 80,
+      include: {
+        ride: {
+          select: {
+            id: true,
+            passengerUserId: true,
+            driverUserId: true,
+          },
+        },
+      },
+    }),
+    prisma.orderStatusEvent.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 80,
+      include: {
+        order: {
+          select: {
+            id: true,
+            userId: true,
+            courierId: true,
+          },
+        },
+      },
+    }),
+  ]);
+
+  return {
+    latestRideEvents,
+    latestOrderEvents,
   };
 });
 
@@ -1133,6 +2795,8 @@ app.get("/home", async () => {
       name: store.name,
       category: store.category,
       description: store.description,
+      lat: store.lat,
+      lng: store.lng,
       rating: store.rating,
       etaMinutes: store.etaMinutes,
       deliveryFee: store.deliveryFee,
@@ -1176,6 +2840,8 @@ app.get("/stores", async () => {
     name: store.name,
     category: store.category,
     description: store.description,
+    lat: store.lat,
+    lng: store.lng,
     rating: store.rating,
     etaMinutes: store.etaMinutes,
     deliveryFee: store.deliveryFee,
@@ -2685,6 +4351,87 @@ app.patch("/livreur/orders/:orderId/status", async (request, reply) => {
     statusLabel: statusLabel(body.status),
   };
 });
+
+appAny.get(
+  "/ws/rides/:rideId",
+  { websocket: true },
+  async (socket: WsLike, request: FastifyRequest) => {
+    const paramsResult = z
+      .object({ rideId: z.string().cuid() })
+      .safeParse((request as FastifyRequest & { params: unknown }).params);
+
+    if (!paramsResult.success) {
+      sendSocket(socket, { type: "error", message: "Invalid rideId" });
+      socket.close();
+      return;
+    }
+
+    const queryResult = z
+      .object({ token: z.string().min(20) })
+      .safeParse((request as FastifyRequest & { query: unknown }).query);
+
+    if (!queryResult.success) {
+      sendSocket(socket, { type: "error", message: "Missing token" });
+      socket.close();
+      return;
+    }
+
+    let auth: AuthTokenPayload;
+    try {
+      auth = await verifyTokenString(queryResult.data.token);
+      if (auth.accessStatus !== UserAccessStatus.ACTIVE) {
+        throw new Error("inactive");
+      }
+    } catch {
+      sendSocket(socket, { type: "error", message: "Invalid token" });
+      socket.close();
+      return;
+    }
+
+    const ride = await prisma.ride.findUnique({
+      where: { id: paramsResult.data.rideId },
+      select: {
+        id: true,
+        passengerUserId: true,
+        driverUserId: true,
+      },
+    });
+
+    if (!ride || !canAccessRide(ride, auth)) {
+      sendSocket(socket, { type: "error", message: "Forbidden" });
+      socket.close();
+      return;
+    }
+
+    const rideId = paramsResult.data.rideId;
+    const sockets = rideSockets.get(rideId) ?? new Set<WsLike>();
+    sockets.add(socket);
+    rideSockets.set(rideId, sockets);
+
+    sendSocket(socket, {
+      type: "connected",
+      rideId,
+      message: "Ride websocket connected",
+    });
+
+    const heartbeat = setInterval(() => {
+      publishRideRefresh(rideId, "heartbeat");
+    }, 5000);
+
+    socket.on("close", () => {
+      clearInterval(heartbeat);
+      const current = rideSockets.get(rideId);
+      if (!current) {
+        return;
+      }
+
+      current.delete(socket);
+      if (current.size === 0) {
+        rideSockets.delete(rideId);
+      }
+    });
+  },
+);
 
 appAny.get(
   "/ws/orders/:orderId",

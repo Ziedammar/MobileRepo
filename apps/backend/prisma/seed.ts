@@ -10,6 +10,15 @@ const superAdminPassword =
   process.env.SEED_SUPER_ADMIN_PASSWORD ?? "SuperAdmin123!";
 
 async function main() {
+  await prisma.supportMessage.deleteMany();
+  await prisma.supportTicket.deleteMany();
+  await prisma.userNotification.deleteMany();
+  await prisma.paymentTransaction.deleteMany();
+  await prisma.paymentMethod.deleteMany();
+  await prisma.rideEvent.deleteMany();
+  await prisma.ride.deleteMany();
+  await prisma.savedPlace.deleteMany();
+  await prisma.authSession.deleteMany();
   await prisma.orderStatusEvent.deleteMany();
   await prisma.orderItem.deleteMany();
   await prisma.order.deleteMany();

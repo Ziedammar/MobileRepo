@@ -19,10 +19,22 @@ export type AuthUser = {
 
 export type AuthResponse = {
   token: string | null;
+  refreshToken?: string | null;
   requiresApproval: boolean;
   message: string;
   user: AuthUser;
 };
+
+export type RideStatus =
+  | "PENDING"
+  | "ACCEPTED"
+  | "ONGOING"
+  | "COMPLETED"
+  | "CANCELLED";
+
+export type RideServiceType = "UBER_X" | "COMFORT" | "BLACK" | "XL";
+export type PaymentMethodType = "CARD" | "APPLE_PAY" | "GOOGLE_PAY" | "CASH";
+export type SavedPlaceKind = "HOME" | "WORK" | "SAVED";
 
 export type Product = {
   id: string;
@@ -213,6 +225,183 @@ export type TrackingResponse = {
     lat: number;
     lng: number;
   };
+};
+
+export type SavedPlace = {
+  id: string;
+  userId: string;
+  label: string;
+  kind: SavedPlaceKind;
+  address: string;
+  lat: number;
+  lng: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RideHomeResponse = {
+  whereToLabel: string;
+  userLocation: {
+    lat: number;
+    lng: number;
+    address: string;
+  };
+  quickSuggestions: string[];
+  recent: Array<{
+    id: string;
+    destination: string;
+    status: RideStatus;
+    serviceType: RideServiceType;
+    amount: number;
+    createdAt: string;
+  }>;
+  shortcuts: {
+    home: SavedPlace | null;
+    work: SavedPlace | null;
+    saved: SavedPlace[];
+  };
+};
+
+export type RideSearchResponse = {
+  query: string;
+  results: Array<{
+    title: string;
+    address: string;
+    lat: number;
+    lng: number;
+  }>;
+  favorites: SavedPlace[];
+  recent: Array<{
+    destinationAddress: string;
+    destinationLat: number;
+    destinationLng: number;
+  }>;
+};
+
+export type RideOption = {
+  serviceType: RideServiceType;
+  label: string;
+  etaMinutes: number;
+  seats: number;
+  estimatedPrice: number;
+};
+
+export type RideOptionsResponse = {
+  distanceKm: number;
+  options: RideOption[];
+  paymentMethods: PaymentMethodType[];
+};
+
+export type Ride = {
+  id: string;
+  passengerUserId: string;
+  driverUserId: string | null;
+  status: RideStatus;
+  serviceType: RideServiceType;
+  paymentMethodType: PaymentMethodType;
+  pickupAddress: string;
+  pickupLat: number;
+  pickupLng: number;
+  destinationAddress: string;
+  destinationLat: number;
+  destinationLng: number;
+  seats: number;
+  etaMinutes: number;
+  distanceKm: number;
+  estimatedPrice: number;
+  finalPrice: number | null;
+  currency: string;
+  promoCode: string | null;
+  driverName: string | null;
+  driverPhotoUrl: string | null;
+  vehicleLabel: string | null;
+  vehiclePlate: string | null;
+  acceptedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  cancelledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RideTrackingResponse = {
+  rideId: string;
+  status: RideStatus;
+  etaMinutes: number;
+  pickup: {
+    lat: number;
+    lng: number;
+    text: string;
+  };
+  destination: {
+    lat: number;
+    lng: number;
+    text: string;
+  };
+  position: {
+    lat: number;
+    lng: number;
+  };
+  driver: {
+    name: string;
+    vehicle: string;
+  } | null;
+};
+
+export type UserPaymentMethod = {
+  id: string;
+  userId: string;
+  type: PaymentMethodType;
+  label: string;
+  providerToken: string | null;
+  last4: string | null;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PaymentTransaction = {
+  id: string;
+  userId: string | null;
+  rideId: string | null;
+  amount: number;
+  currency: string;
+  provider: string;
+  status: "PENDING" | "PAID" | "FAILED" | "REFUNDED";
+  providerRef: string | null;
+  invoiceUrl: string | null;
+  paidAt: string | null;
+  createdAt: string;
+};
+
+export type NotificationsResponse = {
+  unread: number;
+  items: Array<{
+    id: string;
+    userId: string;
+    type: "DRIVER_ARRIVED" | "PROMOTION" | "RIDE_STATUS" | "SYSTEM";
+    title: string;
+    body: string;
+    payloadJson: string | null;
+    readAt: string | null;
+    createdAt: string;
+  }>;
+};
+
+export type SupportTicket = {
+  id: string;
+  userId: string;
+  subject: string;
+  status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED";
+  createdAt: string;
+  updatedAt: string;
+  messages: Array<{
+    id: string;
+    ticketId: string;
+    senderRole: string;
+    message: string;
+    createdAt: string;
+  }>;
 };
 
 export type AdminDashboardResponse = {

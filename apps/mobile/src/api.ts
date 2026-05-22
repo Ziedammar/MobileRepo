@@ -11,12 +11,22 @@ import type {
   HomeResponse,
   LivreurOrdersResponse,
   MeResponse,
+  NotificationsResponse,
   OrderDetails,
+  PaymentMethodType,
+  PaymentTransaction,
   PaymentResponse,
   Product,
+  Ride,
+  RideHomeResponse,
+  RideOptionsResponse,
+  RideSearchResponse,
+  RideTrackingResponse,
   StoreDetails,
+  SupportTicket,
   SuperAdminDashboard,
   TrackingResponse,
+  UserPaymentMethod,
 } from "./types";
 
 const fallbackBaseUrl =
@@ -28,10 +38,18 @@ export const WS_BASE_URL = API_BASE_URL.replace(/^http/i, (protocol: string) =>
 );
 
 let authToken: string | null = null;
+let refreshToken: string | null = null;
 
 export const setAuthToken = (token: string | null): void => {
   authToken = token;
 };
+
+export const setRefreshToken = (token: string | null): void => {
+  refreshToken = token;
+};
+
+export const getRideWsUrl = (rideId: string, token: string): string =>
+  `${WS_BASE_URL}/ws/rides/${rideId}?token=${encodeURIComponent(token)}`;
 
 export const getOrderWsUrl = (orderId: string, token: string): string =>
   `${WS_BASE_URL}/ws/orders/${orderId}?token=${encodeURIComponent(token)}`;
@@ -95,6 +113,26 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   me: () => request<MeResponse>("/auth/me"),
+  refresh: () =>
+    request<AuthResponse>("/auth/refresh", {
+      method: "POST",
+      body: JSON.stringify({ refreshToken }),
+    }),
+  logout: () =>
+    request<{ success: boolean }>("/auth/logout", {
+      method: "POST",
+      body: JSON.stringify({ refreshToken }),
+    }),
+  oauthGoogle: (payload: { providerToken: string; email: string; name: string }) =>
+    request<AuthResponse>("/auth/oauth/google", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  oauthApple: (payload: { providerToken: string; email: string; name: string }) =>
+    request<AuthResponse>("/auth/oauth/apple", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   createOrder: (payload: CreateOrderPayload) =>
     request<CreateOrderResponse>("/orders", {
@@ -243,4 +281,141 @@ export const api = {
         body: JSON.stringify({ status }),
       },
     ),
+
+  getRideHome: () => request<RideHomeResponse>("/rides/home"),
+  searchRideDestination: (query: string) =>
+    request<RideSearchResponse>(`/rides/search?query=${encodeURIComponent(query)}`),
+  getRideOptions: (payload: {
+    pickupLat: number;
+    pickupLng: number;
+    destinationLat: number;
+    destinationLng: number;
+  }) =>
+    request<RideOptionsResponse>(
+      `/rides/options?pickupLat=${payload.pickupLat}&pickupLng=${payload.pickupLng}&destinationLat=${payload.destinationLat}&destinationLng=${payload.destinationLng}`,
+    ),
+  addSavedPlace: (payload: {
+    label: string;
+    kind: "HOME" | "WORK" | "SAVED";
+    address: string;
+    lat: number;
+    lng: number;
+  }) =>
+    request("/rides/saved-places", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  createRide: (payload: {
+    pickupAddress: string;
+    pickupLat: number;
+    pickupLng: number;
+    destinationAddress: string;
+    destinationLat: number;
+    destinationLng: number;
+    serviceType: "UBER_X" | "COMFORT" | "BLACK" | "XL";
+    paymentMethodType: "CARD" | "APPLE_PAY" | "GOOGLE_PAY" | "CASH";
+    seats?: number;
+    promoCode?: string;
+  }) =>
+    request<Ride>("/rides", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getRide: (rideId: string) => request<Ride>(`/rides/${rideId}`),
+  getRideTracking: (rideId: string) =>
+    request<RideTrackingResponse>(`/rides/${rideId}/tracking`),
+  getRideHistory: () => request<Ride[]>("/rides/history"),
+  cancelRide: (rideId: string, reason?: string) =>
+    request<{ id: string; status: string }>(`/rides/${rideId}/cancel`, {
+      method: "PATCH",
+      body: JSON.stringify({ reason }),
+    }),
+  updateDriverRideStatus: (
+    rideId: string,
+    status: "ACCEPTED" | "ONGOING" | "COMPLETED",
+  ) =>
+    request<{ id: string; status: string }>(`/rides/${rideId}/driver/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
+
+  getPaymentMethods: () => request<UserPaymentMethod[]>("/payments/methods"),
+  addPaymentMethod: (payload: {
+    type: PaymentMethodType;
+    label: string;
+    last4?: string;
+    isDefault?: boolean;
+  }) =>
+    request<UserPaymentMethod>("/payments/methods", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  payRide: (
+    rideId: string,
+    payload: {
+      methodType: PaymentMethodType;
+      couponCode?: string;
+    },
+  ) =>
+    request<{
+      paymentId: string;
+      rideId: string;
+      amount: number;
+      status: string;
+      invoiceUrl: string | null;
+    }>(`/rides/${rideId}/pay`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getRideInvoice: (rideId: string) =>
+    request<{
+      rideId: string;
+      paymentId: string;
+      amount: number;
+      currency: string;
+      invoiceUrl: string | null;
+      paidAt: string | null;
+    }>(`/rides/${rideId}/invoice`),
+  getPaymentsHistory: () => request<PaymentTransaction[]>("/payments/history"),
+  getNotifications: () => request<NotificationsResponse>("/notifications"),
+  markNotificationRead: (notificationId: string) =>
+    request<{ success: boolean }>(`/notifications/${notificationId}/read`, {
+      method: "PATCH",
+    }),
+  getSupportFaqs: () =>
+    request<Array<{ question: string; answer: string }>>("/support/faqs"),
+  createSupportTicket: (payload: { subject: string; message: string }) =>
+    request<SupportTicket>("/support/tickets", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getSupportTickets: () => request<SupportTicket[]>("/support/tickets/me"),
+  sendSupportMessage: (ticketId: string, message: string) =>
+    request(`/support/tickets/${ticketId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
+
+  getSuperAdminUsers: () => request<Array<AuthResponse["user"]>>("/super-admin/users"),
+  updateSuperAdminUserAccessStatus: (
+    userId: string,
+    accessStatus: "ACTIVE" | "PENDING_APPROVAL" | "REJECTED" | "SUSPENDED",
+  ) =>
+    request(`/super-admin/users/${userId}/access-status`, {
+      method: "PATCH",
+      body: JSON.stringify({ accessStatus }),
+    }),
+  getSuperAdminAnalytics: () =>
+    request<{
+      ridesToday: number;
+      ridesCompleted: number;
+      ridesCancelled: number;
+      usersActive: number;
+      paymentsToday: number;
+    }>("/super-admin/analytics"),
+  getSuperAdminLogs: () =>
+    request<{
+      latestRideEvents: unknown[];
+      latestOrderEvents: unknown[];
+    }>("/super-admin/logs"),
 };
