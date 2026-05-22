@@ -42,6 +42,8 @@ export type StoreSummary = {
   name: string;
   category: string;
   description: string;
+  lat?: number;
+  lng?: number;
   rating: number;
   etaMinutes: number;
   deliveryFee: number;
@@ -75,6 +77,8 @@ export type StoreDetails = {
   name: string;
   category: string;
   description: string;
+  lat: number;
+  lng: number;
   rating: number;
   etaMinutes: number;
   deliveryFee: number;

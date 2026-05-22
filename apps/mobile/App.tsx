@@ -2,6 +2,7 @@ import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { StatusBar } from "expo-status-bar";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useMemo, useState } from "react";
+import MapView, { Marker, Polyline } from "react-native-maps";
 import {
   Appbar,
   BottomNavigation,
@@ -129,6 +130,38 @@ const categoryIconMap: Record<string, keyof typeof MaterialCommunityIcons.glyphM
 const categoryIconFor = (category: string): keyof typeof MaterialCommunityIcons.glyphMap => {
   const normalized = category.trim().toLowerCase();
   return categoryIconMap[normalized] ?? "silverware-fork-knife";
+};
+
+const computeMapRegion = (
+  points: Array<{ latitude: number; longitude: number }>,
+): {
+  latitude: number;
+  longitude: number;
+  latitudeDelta: number;
+  longitudeDelta: number;
+} => {
+  if (points.length === 0) {
+    return {
+      latitude: 36.8065,
+      longitude: 10.1815,
+      latitudeDelta: 0.08,
+      longitudeDelta: 0.08,
+    };
+  }
+
+  const lats = points.map((point) => point.latitude);
+  const lngs = points.map((point) => point.longitude);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+
+  return {
+    latitude: (minLat + maxLat) / 2,
+    longitude: (minLng + maxLng) / 2,
+    latitudeDelta: Math.max(0.01, (maxLat - minLat) * 1.8),
+    longitudeDelta: Math.max(0.01, (maxLng - minLng) * 1.8),
+  };
 };
 
 const internetPaperTheme = {
@@ -808,6 +841,16 @@ export default function App() {
 
   const renderClientHome = () => {
     if (selectedStore) {
+      const customerPoint = {
+        latitude: 36.842,
+        longitude: 10.272,
+      };
+      const storePoint = {
+        latitude: selectedStore.lat,
+        longitude: selectedStore.lng,
+      };
+      const storeRegion = computeMapRegion([storePoint, customerPoint]);
+
       return (
         <View style={styles.screen}>
           <View style={styles.rowBetween}>
@@ -839,6 +882,24 @@ export default function App() {
               </LinearGradient>
             </View>
             <Text style={styles.supportingText}>{selectedStore.description}</Text>
+
+            <View style={styles.templateMapCard}>
+              <Text style={styles.mapCardTitle}>Localisation restaurant</Text>
+              <MapView style={styles.templateMapView} initialRegion={storeRegion}>
+                <Marker coordinate={storePoint} title={selectedStore.name} pinColor="#111827" />
+                <Marker
+                  coordinate={customerPoint}
+                  title="Votre adresse"
+                  description={addressText}
+                  pinColor={templatePalette.primaryDark}
+                />
+                <Polyline
+                  coordinates={[storePoint, customerPoint]}
+                  strokeColor={templatePalette.primaryDark}
+                  strokeWidth={3}
+                />
+              </MapView>
+            </View>
 
             {selectedStore.products.map((product) => (
               <View key={product.id} style={styles.templateProductRowCard}>
@@ -1107,64 +1168,109 @@ export default function App() {
     </ScrollView>
   );
 
-  const renderClientTracking = () => (
-    <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
-      <Text style={styles.sectionTitle}>Suivi commande</Text>
+  const renderClientTracking = () => {
+    const routePoints =
+      tracking !== null
+        ? [
+            {
+              latitude: tracking.pickup.lat,
+              longitude: tracking.pickup.lng,
+            },
+            {
+              latitude: tracking.position.lat,
+              longitude: tracking.position.lng,
+            },
+            {
+              latitude: tracking.destination.lat,
+              longitude: tracking.destination.lng,
+            },
+          ]
+        : [];
+    const trackingRegion = computeMapRegion(routePoints);
 
-      {!orderId || !orderDetails || !tracking ? (
-        <View style={styles.emptyBox}>
-          <MaterialCommunityIcons
-            name="map-marker-path"
-            size={30}
-            color={templatePalette.primaryDark}
-          />
-          <Text style={styles.emptyBoxText}>
-            Passez une commande pour activer le tracking.
-          </Text>
-        </View>
-      ) : (
-        <>
-          <LinearGradient colors={["#FFF3C4", "#FFF7D6"]} style={styles.trackingHero}>
-            <Text style={styles.trackingStatus}>{orderDetails.statusLabel}</Text>
-            <Text style={styles.trackingEta}>Paiement: {orderDetails.paymentStatus}</Text>
-            <Text style={styles.trackingEta}>ETA {tracking.etaMinutes} min</Text>
-            <Text style={styles.trackingOrder}>#{orderDetails.id.slice(0, 8)}</Text>
-          </LinearGradient>
+    return (
+      <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
+        <Text style={styles.sectionTitle}>Suivi commande</Text>
 
-          <View style={styles.mapCard}>
-            <Text style={styles.mapCardTitle}>Position live</Text>
-            <Text style={styles.mapCoordinate}>
-              📍 {tracking.position.lat.toFixed(4)}, {tracking.position.lng.toFixed(4)}
-            </Text>
-            <Text style={styles.mapCoordinate}>
-              🎯 {tracking.destination.text}
+        {!orderId || !orderDetails || !tracking ? (
+          <View style={styles.emptyBox}>
+            <MaterialCommunityIcons
+              name="map-marker-path"
+              size={30}
+              color={templatePalette.primaryDark}
+            />
+            <Text style={styles.emptyBoxText}>
+              Passez une commande pour activer le tracking.
             </Text>
           </View>
+        ) : (
+          <>
+            <LinearGradient colors={["#FFF3C4", "#FFF7D6"]} style={styles.trackingHero}>
+              <Text style={styles.trackingStatus}>{orderDetails.statusLabel}</Text>
+              <Text style={styles.trackingEta}>Paiement: {orderDetails.paymentStatus}</Text>
+              <Text style={styles.trackingEta}>ETA {tracking.etaMinutes} min</Text>
+              <Text style={styles.trackingOrder}>#{orderDetails.id.slice(0, 8)}</Text>
+            </LinearGradient>
 
-          <Text style={styles.sectionSubtitle}>Timeline</Text>
-          {orderDetails.timeline.map((event) => (
-            <View key={event.id} style={styles.timelineItem}>
-              <View style={styles.timelineDot} />
-              <View>
-                <Text style={styles.timelineLabel}>{event.label}</Text>
-                <Text style={styles.timelineTimestamp}>
-                  {new Date(event.timestamp).toLocaleTimeString("fr-FR")}
-                </Text>
-              </View>
+            <View style={styles.mapCard}>
+              <Text style={styles.mapCardTitle}>Position live</Text>
+              <MapView style={styles.trackingMapView} initialRegion={trackingRegion}>
+                <Marker
+                  coordinate={{
+                    latitude: tracking.pickup.lat,
+                    longitude: tracking.pickup.lng,
+                  }}
+                  title={tracking.pickup.name}
+                  pinColor="#111827"
+                />
+                <Marker
+                  coordinate={{
+                    latitude: tracking.destination.lat,
+                    longitude: tracking.destination.lng,
+                  }}
+                  title={tracking.destination.text}
+                  pinColor={templatePalette.primaryDark}
+                />
+                <Marker
+                  coordinate={{
+                    latitude: tracking.position.lat,
+                    longitude: tracking.position.lng,
+                  }}
+                  title={tracking.courier?.name ?? "Livreur"}
+                  description={tracking.courier?.vehicle ?? "En route"}
+                  pinColor="#22C55E"
+                />
+                <Polyline coordinates={routePoints} strokeColor="#111827" strokeWidth={3} />
+              </MapView>
+              <Text style={styles.mapCoordinate}>Depart: {tracking.pickup.name}</Text>
+              <Text style={styles.mapCoordinate}>Arrivee: {tracking.destination.text}</Text>
             </View>
-          ))}
 
-          {orderDetails.status !== "DELIVERED" &&
-          orderDetails.status !== "CANCELLED" &&
-          orderDetails.status !== "REFUSED" ? (
-            <Pressable style={styles.cancelButton} onPress={() => void cancelOrder()}>
-              <Text style={styles.cancelButtonText}>Annuler la commande</Text>
-            </Pressable>
-          ) : null}
-        </>
-      )}
-    </ScrollView>
-  );
+            <Text style={styles.sectionSubtitle}>Timeline</Text>
+            {orderDetails.timeline.map((event) => (
+              <View key={event.id} style={styles.timelineItem}>
+                <View style={styles.timelineDot} />
+                <View>
+                  <Text style={styles.timelineLabel}>{event.label}</Text>
+                  <Text style={styles.timelineTimestamp}>
+                    {new Date(event.timestamp).toLocaleTimeString("fr-FR")}
+                  </Text>
+                </View>
+              </View>
+            ))}
+
+            {orderDetails.status !== "DELIVERED" &&
+            orderDetails.status !== "CANCELLED" &&
+            orderDetails.status !== "REFUSED" ? (
+              <Pressable style={styles.cancelButton} onPress={() => void cancelOrder()}>
+                <Text style={styles.cancelButtonText}>Annuler la commande</Text>
+              </Pressable>
+            ) : null}
+          </>
+        )}
+      </ScrollView>
+    );
+  };
 
   const renderAdminDashboard = () => (
     <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
@@ -1745,174 +1851,163 @@ export default function App() {
   };
 
   const renderAuthScreen = () => (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="dark" />
-      <LinearGradient colors={["#F9FAFB", "#F3F4F6"]} style={styles.authScreen}>
-        <ThemeHeaderCard
-          icon="food-fork-drink"
-          title="Livraison Pro"
-          subtitle="Template moderne: Sign In / Sign Up avec validation Super Admin"
+    <SafeAreaView style={styles.authRoot}>
+      <StatusBar style="light" />
+      <View style={styles.uberAuthHero}>
+        <View style={styles.uberBrandPill}>
+          <MaterialCommunityIcons name="car-side" size={20} color="#FFFFFF" />
+          <Text style={styles.uberBrandPillText}>Uber style login</Text>
+        </View>
+        <Text style={styles.uberBrandTitle}>Livraison Pro</Text>
+        <Text style={styles.uberBrandSubtitle}>
+          Sign in pour commander, suivre sur map, ou gerer ton restaurant.
+        </Text>
+      </View>
+
+      <View style={styles.uberAuthSheet}>
+        {errorMessage ? (
+          <View style={styles.errorBanner}>
+            <MaterialCommunityIcons name="alert-circle-outline" size={16} color="#B91C1C" />
+            <Text style={styles.errorBannerText}>{errorMessage}</Text>
+          </View>
+        ) : null}
+        {infoMessage ? (
+          <View style={styles.infoBanner}>
+            <MaterialCommunityIcons name="information-outline" size={16} color="#111827" />
+            <Text style={styles.infoBannerText}>{infoMessage}</Text>
+          </View>
+        ) : null}
+
+        <View style={styles.authModeRow}>
+          <Pressable
+            style={[
+              styles.authModeChip,
+              authMode === "signin" ? styles.authModeChipActive : null,
+            ]}
+            onPress={() => setAuthMode("signin")}
+          >
+            <Text
+              style={[
+                styles.authModeText,
+                authMode === "signin" ? styles.authModeTextActive : null,
+              ]}
+            >
+              Sign in
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[styles.authModeChip, authMode === "signup" ? styles.authModeChipActive : null]}
+            onPress={() => setAuthMode("signup")}
+          >
+            <Text
+              style={[
+                styles.authModeText,
+                authMode === "signup" ? styles.authModeTextActive : null,
+              ]}
+            >
+              Sign up
+            </Text>
+          </Pressable>
+        </View>
+
+        {authMode === "signup" ? (
+          <>
+            <TextInput
+              value={authName}
+              onChangeText={setAuthName}
+              placeholder="Full name"
+              placeholderTextColor="#9CA3AF"
+              style={styles.uberInput}
+            />
+            <View style={styles.authRoleRow}>
+              {signupRoles.map((entry) => {
+                const role = entry.role;
+                const selected = authRole === role;
+                return (
+                  <Pressable
+                    key={role}
+                    style={[styles.authRoleChip, selected ? styles.authRoleChipActive : null]}
+                    onPress={() => setAuthRole(role)}
+                  >
+                    <MaterialCommunityIcons
+                      name={entry.icon}
+                      size={16}
+                      color={selected ? templatePalette.ink : "#6B7280"}
+                      style={{ marginBottom: 4 }}
+                    />
+                    <Text
+                      style={[styles.authRoleText, selected ? styles.authRoleTextActive : null]}
+                    >
+                      {entry.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {authRole === "ADMIN" ? (
+              <TextInput
+                value={authStoreName}
+                onChangeText={setAuthStoreName}
+                placeholder="Restaurant name"
+                placeholderTextColor="#9CA3AF"
+                style={styles.uberInput}
+              />
+            ) : null}
+            {authRole === "LIVREUR" ? (
+              <TextInput
+                value={authVehicle}
+                onChangeText={setAuthVehicle}
+                placeholder="Vehicle type"
+                placeholderTextColor="#9CA3AF"
+                style={styles.uberInput}
+              />
+            ) : null}
+          </>
+        ) : null}
+
+        <TextInput
+          value={authEmail}
+          onChangeText={setAuthEmail}
+          placeholder="Email address"
+          placeholderTextColor="#9CA3AF"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          style={styles.uberInput}
+        />
+        <TextInput
+          value={authPassword}
+          onChangeText={setAuthPassword}
+          placeholder="Password"
+          placeholderTextColor="#9CA3AF"
+          secureTextEntry
+          style={styles.uberInput}
         />
 
-        <View style={styles.authCard}>
-          {errorMessage ? (
-            <View style={styles.errorBanner}>
-              <MaterialCommunityIcons
-                name="alert-circle-outline"
-                size={16}
-                color="#B91C1C"
-              />
-              <Text style={styles.errorBannerText}>{errorMessage}</Text>
-            </View>
-          ) : null}
-          {infoMessage ? (
-            <View style={styles.infoBanner}>
-              <MaterialCommunityIcons
-                name="information-outline"
-                size={16}
-                color={templatePalette.ink}
-              />
-              <Text style={styles.infoBannerText}>{infoMessage}</Text>
-            </View>
-          ) : null}
+        <Pressable
+          style={[styles.uberPrimaryButton, authLoading ? styles.checkoutButtonDisabled : null]}
+          onPress={() => void submitAuth()}
+          disabled={authLoading}
+        >
+          {authLoading ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.uberPrimaryButtonText}>
+              {authMode === "signin" ? "Continue" : "Create account"}
+            </Text>
+          )}
+        </Pressable>
 
-          <View style={styles.authModeRow}>
-            <Pressable
-              style={[
-                styles.authModeChip,
-                authMode === "signin" ? styles.authModeChipActive : null,
-              ]}
-              onPress={() => setAuthMode("signin")}
-            >
-              <Text
-                style={[
-                  styles.authModeText,
-                  authMode === "signin" ? styles.authModeTextActive : null,
-                ]}
-              >
-                Sign In
-              </Text>
-            </Pressable>
-            <Pressable
-              style={[
-                styles.authModeChip,
-                authMode === "signup" ? styles.authModeChipActive : null,
-              ]}
-              onPress={() => setAuthMode("signup")}
-            >
-              <Text
-                style={[
-                  styles.authModeText,
-                  authMode === "signup" ? styles.authModeTextActive : null,
-                ]}
-              >
-                Sign Up
-              </Text>
-            </Pressable>
-          </View>
+        <Pressable style={styles.uberSecondaryButton} onPress={() => void continueAsGuest()}>
+          <Text style={styles.uberSecondaryButtonText}>Continue as guest</Text>
+        </Pressable>
 
-          {authMode === "signup" ? (
-            <>
-              <TextInput
-                value={authName}
-                onChangeText={setAuthName}
-                placeholder="Nom complet"
-                placeholderTextColor="#94A3B8"
-                style={styles.authInput}
-              />
-              <View style={styles.authRoleRow}>
-                {signupRoles.map((entry) => {
-                  const role = entry.role;
-                  const selected = authRole === role;
-                  return (
-                    <Pressable
-                      key={role}
-                      style={[styles.authRoleChip, selected ? styles.authRoleChipActive : null]}
-                      onPress={() => setAuthRole(role)}
-                    >
-                      <MaterialCommunityIcons
-                        name={entry.icon}
-                        size={16}
-                        color={selected ? templatePalette.ink : "#64748B"}
-                        style={{ marginBottom: 4 }}
-                      />
-                      <Text
-                        style={[
-                          styles.authRoleText,
-                          selected ? styles.authRoleTextActive : null,
-                        ]}
-                      >
-                        {entry.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-              {authRole === "ADMIN" ? (
-                <TextInput
-                  value={authStoreName}
-                  onChangeText={setAuthStoreName}
-                  placeholder="Nom restaurant (demande)"
-                  placeholderTextColor="#94A3B8"
-                  style={styles.authInput}
-                />
-              ) : null}
-              {authRole === "LIVREUR" ? (
-                <TextInput
-                  value={authVehicle}
-                  onChangeText={setAuthVehicle}
-                  placeholder="Vehicule"
-                  placeholderTextColor="#94A3B8"
-                  style={styles.authInput}
-                />
-              ) : null}
-            </>
-          ) : null}
-
-          <TextInput
-            value={authEmail}
-            onChangeText={setAuthEmail}
-            placeholder="Email"
-            placeholderTextColor="#94A3B8"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            style={styles.authInput}
-          />
-          <TextInput
-            value={authPassword}
-            onChangeText={setAuthPassword}
-            placeholder="Mot de passe"
-            placeholderTextColor="#94A3B8"
-            secureTextEntry
-            style={styles.authInput}
-          />
-
-          <Pressable
-            style={[styles.checkoutButton, authLoading ? styles.checkoutButtonDisabled : null]}
-            onPress={() => void submitAuth()}
-            disabled={authLoading}
-          >
-            {authLoading ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <Text style={styles.checkoutButtonText}>
-                {authMode === "signin" ? "Se connecter" : "Creer un compte"}
-              </Text>
-            )}
-          </Pressable>
-
-          <Pressable style={styles.secondaryButton} onPress={() => void continueAsGuest()}>
-            <Text style={styles.secondaryButtonText}>Continuer en invite (client)</Text>
-          </Pressable>
-
-          <Text style={styles.authFootnote}>
-            Client: acces direct. Admin et Livreur: validation Super Admin obligatoire.
-          </Text>
-          <Text style={styles.authFootnote}>
-            Compte Super Admin de test: superadmin@livraisonpro.app / SuperAdmin123!
-          </Text>
-        </View>
-      </LinearGradient>
+        <Text style={styles.authFootnote}>
+          Admin/Livreur necessitent validation Super Admin avant acces.
+        </Text>
+        <Text style={styles.authFootnote}>
+          Super Admin: superadmin@livraisonpro.app / SuperAdmin123!
+        </Text>
+      </View>
     </SafeAreaView>
   );
 
@@ -1995,6 +2090,93 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: templatePalette.background,
+  },
+  authRoot: {
+    flex: 1,
+    backgroundColor: "#111827",
+  },
+  uberAuthHero: {
+    flex: 0.38,
+    paddingHorizontal: 20,
+    paddingTop: 26,
+    justifyContent: "center",
+    backgroundColor: "#111827",
+  },
+  uberBrandPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: "#1F2937",
+    borderWidth: 1,
+    borderColor: "#374151",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    gap: 6,
+  },
+  uberBrandPillText: {
+    color: "#F9FAFB",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  uberBrandTitle: {
+    color: "#FFFFFF",
+    marginTop: 12,
+    fontSize: 34,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
+  uberBrandSubtitle: {
+    color: "#D1D5DB",
+    marginTop: 8,
+    lineHeight: 19,
+    maxWidth: "90%",
+  },
+  uberAuthSheet: {
+    flex: 0.62,
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    padding: 16,
+  },
+  uberInput: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#D1D5DB",
+    backgroundColor: "#F9FAFB",
+    color: "#111827",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 10,
+    fontSize: 14,
+  },
+  uberPrimaryButton: {
+    borderRadius: 12,
+    minHeight: 50,
+    backgroundColor: "#111827",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+    marginBottom: 10,
+  },
+  uberPrimaryButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 15,
+  },
+  uberSecondaryButton: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#111827",
+    minHeight: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  uberSecondaryButtonText: {
+    color: "#111827",
+    fontWeight: "700",
+    fontSize: 14,
   },
   root: {
     flex: 1,
@@ -2329,6 +2511,19 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     padding: 14,
   },
+  templateMapCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: templatePalette.border,
+    backgroundColor: "#FFFFFF",
+    padding: 10,
+    marginBottom: 12,
+  },
+  templateMapView: {
+    width: "100%",
+    height: 180,
+    borderRadius: 12,
+  },
   templateStoreHeroTitle: {
     color: "#FFFFFF",
     fontSize: 22,
@@ -2641,6 +2836,11 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 10,
     gap: 6,
+  },
+  trackingMapView: {
+    width: "100%",
+    height: 210,
+    borderRadius: 12,
   },
   mapCardTitle: {
     color: "#111827",
