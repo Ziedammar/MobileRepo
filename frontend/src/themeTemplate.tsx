@@ -32,7 +32,7 @@ export function ThemeHeaderCard({
         <Avatar.Icon
           size={38}
           style={styles.iconWrap}
-          color="#D89B00"
+          color="#111827"
           icon={({ size, color }) => (
             <MaterialCommunityIcons name={icon} size={size} color={color} />
           )}
@@ -85,10 +85,15 @@ export function ThemeMetricCard({ icon, value, label }: ThemeMetricCardProps) {
 
 const styles = StyleSheet.create({
   headerCard: {
-    borderRadius: 18,
+    borderRadius: 22,
     marginBottom: 12,
     backgroundColor: "#FFFFFF",
-    borderColor: "#E5E7EB",
+    borderColor: "#E2E8F0",
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
   },
   headerMain: {
     flexDirection: "row",
@@ -96,14 +101,14 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   iconWrap: {
-    backgroundColor: "#FFF3C4",
+    backgroundColor: "#F8FAFC",
   },
   headerContent: {
     flex: 1,
   },
   headerTitle: {
     color: "#0F172A",
-    fontWeight: "800",
+    fontWeight: "900",
   },
   headerSubtitle: {
     color: "#475569",
@@ -116,19 +121,24 @@ const styles = StyleSheet.create({
   },
   metricCard: {
     flex: 1,
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderColor: "#E2E8F0",
     backgroundColor: "#FFFFFF",
     padding: 12,
     alignItems: "center",
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
   },
   metricIconWrap: {
-    backgroundColor: "#FFF7D6",
+    backgroundColor: "#EEF2FF",
     marginBottom: 8,
   },
   metricValue: {
-    color: "#D89B00",
+    color: "#111827",
     fontWeight: "800",
     textAlign: "center",
   },

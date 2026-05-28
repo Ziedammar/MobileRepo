@@ -1508,11 +1508,25 @@ export default function App() {
             {rideSearchResults?.results.map((result, index) => (
               <Pressable
                 key={`${result.address}-${index}`}
-                style={styles.infoCard}
+                style={styles.addressResultCard}
                 onPress={() => void loadRideOptions(result)}
               >
-                <Text style={styles.infoCardTitle}>{result.title}</Text>
-                <Text style={styles.infoCardText}>{result.address}</Text>
+                <View style={styles.addressResultIcon}>
+                  <MaterialCommunityIcons
+                    name="map-marker-radius-outline"
+                    size={16}
+                    color={templatePalette.ink}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.infoCardTitle}>{result.title}</Text>
+                  <Text style={styles.infoCardText}>{result.address}</Text>
+                </View>
+                <MaterialCommunityIcons
+                  name="chevron-right"
+                  size={18}
+                  color="#94A3B8"
+                />
               </Pressable>
             ))}
 
@@ -1654,6 +1668,15 @@ export default function App() {
                   <Text numberOfLines={2} style={styles.templateStoreDesc}>
                     {store.description}
                   </Text>
+                  <View style={styles.glovoMetaRow}>
+                    <View style={styles.templateMetaPill}>
+                      <Text style={styles.templateMetaText}>{store.category}</Text>
+                    </View>
+                    <View style={styles.templateMetaPill}>
+                      <MaterialCommunityIcons name="fire" size={12} color="#F59E0B" />
+                      <Text style={styles.templateMetaText}>Tendance</Text>
+                    </View>
+                  </View>
                   <View style={styles.rowActions}>
                     <View style={styles.templateMetaPill}>
                       <MaterialCommunityIcons name="clock-outline" size={12} color="#6B7280" />
@@ -1662,6 +1685,9 @@ export default function App() {
                     <View style={styles.templateMetaPill}>
                       <MaterialCommunityIcons name="bike-fast" size={12} color="#6B7280" />
                       <Text style={styles.templateMetaText}>{money(store.deliveryFee)}</Text>
+                    </View>
+                    <View style={styles.glovoOpenButton}>
+                      <Text style={styles.glovoOpenButtonText}>Voir menu</Text>
                     </View>
                   </View>
                 </View>
@@ -1820,16 +1846,21 @@ export default function App() {
             <Pressable
               key={option.serviceType}
               style={[
-                styles.infoCard,
+                styles.rideOptionCard,
                 selectedRideOption?.serviceType === option.serviceType
-                  ? styles.templateCategoryChipActive
+                  ? styles.rideOptionCardActive
                   : null,
               ]}
               onPress={() => setSelectedRideOption(option)}
             >
               <View style={styles.rowBetween}>
-                <Text style={styles.infoCardTitle}>{option.label}</Text>
-                <Text style={styles.infoCardTitle}>{money(option.estimatedPrice)}</Text>
+                <View>
+                  <Text style={styles.infoCardTitle}>{option.label}</Text>
+                  <Text style={styles.rideOptionSubline}>
+                    {option.serviceType.replace("_", " ")}
+                  </Text>
+                </View>
+                <Text style={styles.rideOptionPrice}>{money(option.estimatedPrice)}</Text>
               </View>
               <Text style={styles.infoCardText}>
                 ETA {option.etaMinutes} min · {option.seats} places
@@ -3503,6 +3534,23 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
   },
+  glovoMetaRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 8,
+  },
+  glovoOpenButton: {
+    borderRadius: 999,
+    backgroundColor: "#111827",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    justifyContent: "center",
+  },
+  glovoOpenButtonText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "700",
+  },
   templateStoreHeroCard: {
     borderRadius: 20,
     overflow: "hidden",
@@ -3985,6 +4033,53 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 10,
     gap: 5,
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 1,
+  },
+  addressResultCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
+    padding: 12,
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  addressResultIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#EEF2FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  rideOptionCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
+    padding: 14,
+    marginBottom: 10,
+    gap: 5,
+  },
+  rideOptionCardActive: {
+    borderColor: "#111827",
+    backgroundColor: "#F8FAFC",
+  },
+  rideOptionSubline: {
+    color: "#64748B",
+    fontSize: 11,
+    marginTop: 2,
+  },
+  rideOptionPrice: {
+    color: "#111827",
+    fontWeight: "800",
+    fontSize: 16,
   },
   gojekHeaderCard: {
     borderRadius: 16,
