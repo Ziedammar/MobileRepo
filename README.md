@@ -1,30 +1,25 @@
-# Application Livraison Moderne (inspiree de Glovo)
+# Application Super App Uber + Glovo (template style Gojek)
 
-Ce depot contient une base complete backend + frontend mobile pour une application de livraison moderne :
+Ce depot contient une super-app mobile avec backend complet:
+- **Uber-like**: course, ETA, tracking live, paiements, historique, support
+- **Glovo-like**: stores, produits, panier, commande, suivi livreur
+- **Template style Gojek**: home super-app avec quick services
 
-- Backend API: Fastify + Prisma + SQLite
-- Mobile: React Native (Expo) + TypeScript
-- Parcours utilisateur: accueil, catalogue stores, panier, checkout, tracking de commande
-
-Objectif: fournir une base de production evolutive, inspiree de Glovo, avec une interface moderne et un flux de commande de bout en bout.
-
-## 1) Architecture
+## 1) Architecture (demandee: frontend + backend)
 
 ```text
-apps/
-  backend/   -> API livraison (catalogue, commandes, tracking)
-  mobile/    -> Application mobile Expo (UI moderne)
+backend/    -> API Fastify + Prisma + SQLite
+frontend/   -> Mobile React Native Expo + TypeScript
 ```
 
 ## 2) Prerequis
-
 - Node.js 20+
 - npm 10+
 
 ## 3) Lancer le backend
 
 ```bash
-cd apps/backend
+cd backend
 npm install
 cp .env.example .env
 npm run prisma:generate
@@ -33,84 +28,62 @@ npm run db:seed
 npm run dev
 ```
 
-Backend disponible sur http://localhost:3333.
+API par defaut: `http://localhost:3333`
 
-## 4) Lancer l'application mobile
+## 4) Lancer le frontend mobile
 
 ```bash
-cd apps/mobile
+cd frontend
 npm install
 npm run start
 ```
 
-Variable optionnelle (dans apps/mobile/.env) :
+Option `.env` dans `frontend/`:
 
 ```bash
 EXPO_PUBLIC_API_URL=http://localhost:3333
 ```
 
-Pour emulateur Android, utilise typiquement http://10.0.2.2:3333.
+(Android emulator: `http://10.0.2.2:3333`)
 
-## 5) Endpoints backend disponibles (V2 Pro)
+## 5) Modules backend principaux
 
-- GET /health
-- GET /home
-- GET /stores
-- GET /stores/:storeId
-- POST /auth/guest
-- POST /auth/register
-- POST /auth/login
-- GET /auth/me
-- POST /orders
-- POST /orders/:orderId/pay
-- GET /orders/:orderId
-- GET /orders/:orderId/tracking
-- POST /orders/:orderId/cancel
-- GET /admin/dashboard
-- GET /admin/store
-- GET /admin/orders (admin)
-- PATCH /admin/orders/:orderId/decision (admin accepte/refuse)
-- GET /admin/products
-- POST /admin/products
-- PATCH /admin/products/:productId
-- DELETE /admin/products/:productId
-- GET /admin/couriers
-- POST /admin/couriers/associate
-- PATCH /admin/couriers/:courierId/availability
-- GET /super-admin/dashboard
-- GET /super-admin/pending-users
-- PATCH /super-admin/users/:userId/approval
-- GET /livreur/orders/me (livreur)
-- PATCH /livreur/orders/:orderId/status (livreur)
-- WS /ws/orders/:orderId?token=<JWT>
-- WS /ws/admin/dashboard?token=<JWT>
+### Auth & sessions
+- `/auth/register`, `/auth/login`, `/auth/me`
+- `/auth/refresh`, `/auth/logout`
+- `/auth/oauth/google`, `/auth/oauth/apple` (mode simulation)
 
-## 6) Fonctionnalites cle V2
+### Glovo (orders)
+- `/home`, `/stores`, `/stores/:storeId`
+- `/orders`, `/orders/:orderId/pay`, `/orders/:orderId/tracking`, `/orders/:orderId/cancel`
+- WS `/ws/orders/:orderId`
 
-- Catalogue multi-stores
-- Ajout panier + quantites
-- Auth JWT avec 4 roles: Super Admin, Admin, Client, Livreur
-- Sign In / Sign Up moderne (mobile)
-- Workflow d'approbation: Admin/Livreur valides par Super Admin
-- Checkout avec session (invite ou compte)
-- Paiement mock (pret pour integration Stripe/PSP)
-- Timeline de statut commande
-- Tracking livreur temps reel (websocket + fallback polling)
-- Dashboard Admin restaurant avec stats temps reel
-- Produits dynamiques (categorie, stock, disponibilite) visibles cote client
-- Interface mobile blanche et moderne avec icones
+### Uber (rides)
+- `/rides/home`, `/rides/search`, `/rides/options`
+- `/rides`, `/rides/:rideId`, `/rides/:rideId/tracking`, `/rides/:rideId/cancel`
+- `/rides/history`, `/rides/:rideId/pay`, `/rides/:rideId/invoice`
+- WS `/ws/rides/:rideId`
 
-## 7) Seed "real mode"
+### Paiement / notifications / support
+- `/payments/methods`, `/payments/history`
+- `/notifications`, `/notifications/:notificationId/read`
+- `/support/faqs`, `/support/tickets`, `/support/tickets/me`, `/support/tickets/:ticketId/messages`
 
-Le seed cree uniquement le compte Super Admin (pas de faux comptes clients/admin/livreurs).
+### Admin / Super Admin
+- Dashboard/Orders/Products/Couriers (restaurant admin)
+- Rides live admin: `/admin/rides/live`
+- Super admin users/stores/analytics/logs
+- Broadcast notification simulation PUSH/SMS/EMAIL
 
-- superadmin@livraisonpro.app
-- mot de passe: SuperAdmin123! (ou variable SEED_SUPER_ADMIN_PASSWORD)
+## 6) Seed real mode
 
-Tu crees ensuite les comptes reels via Sign Up dans l'app.
-Les comptes Admin et Livreur restent en PENDING_APPROVAL jusqu'a validation par le Super Admin.
+Le seed cree seulement le Super Admin:
+- `superadmin@livraisonpro.app`
+- password: `SuperAdmin123!` (ou `SEED_SUPER_ADMIN_PASSWORD`)
 
-## 8) Scripts utiles (racine)
+Les comptes Admin/Livreur passent en `PENDING_APPROVAL` jusqu'a validation Super Admin.
+
+## 7) Scripts racine
 
 ```bash
 npm run dev:backend

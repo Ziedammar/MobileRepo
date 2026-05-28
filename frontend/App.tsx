@@ -31,6 +31,11 @@ import {
   setAuthToken,
   setRefreshToken,
 } from "./src/api";
+import {
+  gojekPalette,
+  gojekPromoEvents,
+  gojekQuickServices,
+} from "./src/gojekTemplate";
 import { ThemeHeaderCard, ThemeMetricCard } from "./src/themeTemplate";
 import type {
   AdminDashboardResponse,
@@ -68,6 +73,7 @@ type CartItem = {
 
 type AuthMode = "signin" | "signup";
 type SignupRole = "CLIENT" | "ADMIN" | "LIVREUR";
+type ClientServiceMode = "uber" | "glovo";
 
 const signupRoles: Array<{
   role: SignupRole;
@@ -198,6 +204,7 @@ export default function App() {
   const [selectedStore, setSelectedStore] = useState<StoreDetails | null>(null);
   const [selectedCategory, setSelectedCategory] = useState("Tous");
   const [searchValue, setSearchValue] = useState("");
+  const [clientMode, setClientMode] = useState<ClientServiceMode>("uber");
 
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [sessionRefreshToken, setSessionRefreshToken] = useState<string | null>(null);
@@ -1122,38 +1129,129 @@ export default function App() {
   }, [currentUser]);
 
   const renderClientHome = () => {
-    if (!rideHome) {
+    if (clientMode === "glovo" && selectedStore) {
+      const customerPoint = {
+        latitude: 36.842,
+        longitude: 10.272,
+      };
+      const storePoint = {
+        latitude: selectedStore.lat,
+        longitude: selectedStore.lng,
+      };
+      const storeRegion = computeMapRegion([storePoint, customerPoint]);
+
       return (
-        <View style={styles.centeredState}>
-          <ActivityIndicator size="large" color={templatePalette.primaryDark} />
-          <Text style={styles.centeredStateText}>Chargement carte et suggestions...</Text>
+        <View style={styles.screen}>
+          <View style={styles.rowBetween}>
+            <Pressable
+              style={styles.templateIconCircle}
+              onPress={() => setSelectedStore(null)}
+            >
+              <MaterialCommunityIcons
+                name="chevron-left"
+                size={20}
+                color={templatePalette.ink}
+              />
+            </Pressable>
+            <Text style={styles.templatePageTitle}>{selectedStore.name}</Text>
+            <View style={{ width: 32 }} />
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <View style={styles.templateStoreHeroCard}>
+              <Image source={{ uri: selectedStore.imageUrl }} style={styles.storeHeroImage} />
+              <LinearGradient
+                colors={["transparent", "rgba(0,0,0,0.65)"]}
+                style={styles.templateStoreHeroOverlay}
+              >
+                <Text style={styles.templateStoreHeroTitle}>{selectedStore.name}</Text>
+                <Text style={styles.templateStoreHeroSubtitle}>
+                  {selectedStore.category} · ⭐ {selectedStore.rating.toFixed(1)}
+                </Text>
+              </LinearGradient>
+            </View>
+            <Text style={styles.supportingText}>{selectedStore.description}</Text>
+
+            <View style={styles.templateMapCard}>
+              <Text style={styles.mapCardTitle}>Localisation partenaire</Text>
+              <MapView style={styles.templateMapView} initialRegion={storeRegion}>
+                <Marker coordinate={storePoint} title={selectedStore.name} pinColor="#111827" />
+                <Marker
+                  coordinate={customerPoint}
+                  title="Votre adresse"
+                  description={addressText}
+                  pinColor={templatePalette.primaryDark}
+                />
+                <Polyline
+                  coordinates={[storePoint, customerPoint]}
+                  strokeColor={templatePalette.primaryDark}
+                  strokeWidth={3}
+                />
+              </MapView>
+            </View>
+
+            {selectedStore.products.map((product) => (
+              <View key={product.id} style={styles.templateProductRowCard}>
+                <Image source={{ uri: product.imageUrl }} style={styles.productImage} />
+                <View style={styles.productContent}>
+                  <Text style={styles.productName}>{product.name}</Text>
+                  <Text style={styles.productDescription}>{product.description}</Text>
+                  <View style={styles.rowBetween}>
+                    <Text style={styles.productPrice}>{money(product.price)}</Text>
+                    <View style={styles.rowActions}>
+                      <Text style={styles.templateStockText}>Stock {product.stock ?? 0}</Text>
+                      <Pressable
+                        style={styles.addButton}
+                        onPress={() => addProductToCart(selectedStore.id, product)}
+                      >
+                        <MaterialCommunityIcons name="plus" size={16} color="#111827" />
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </ScrollView>
         </View>
       );
     }
 
-    const mapRegion = computeMapRegion([
-      {
-        latitude: rideHome.userLocation.lat,
-        longitude: rideHome.userLocation.lng,
-      },
-      ...(selectedDestination
-        ? [
+    if (!rideHome || (clientMode === "glovo" && loadingHome)) {
+      return (
+        <View style={styles.centeredState}>
+          <ActivityIndicator size="large" color={templatePalette.primaryDark} />
+          <Text style={styles.centeredStateText}>Chargement super-app...</Text>
+        </View>
+      );
+    }
+
+    const mapRegion =
+      clientMode === "uber"
+        ? computeMapRegion([
             {
-              latitude: selectedDestination.lat,
-              longitude: selectedDestination.lng,
+              latitude: rideHome.userLocation.lat,
+              longitude: rideHome.userLocation.lng,
             },
-          ]
-        : []),
-    ]);
+            ...(selectedDestination
+              ? [
+                  {
+                    latitude: selectedDestination.lat,
+                    longitude: selectedDestination.lng,
+                  },
+                ]
+              : []),
+          ])
+        : null;
+    const homeShortcut = rideHome.shortcuts.home;
+    const workShortcut = rideHome.shortcuts.work;
+    const savedShortcut = rideHome.shortcuts.saved[0] ?? null;
 
     return (
       <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
         <View style={styles.rowBetween}>
           <View>
-            <Text style={styles.sectionTitle}>Accueil Ride</Text>
-            <Text style={styles.supportingText}>
-              Carte interactive + recherche intelligente
-            </Text>
+            <Text style={styles.sectionTitle}>Super App Uber + Glovo</Text>
+            <Text style={styles.supportingText}>Template Gojek integre (services rapides)</Text>
           </View>
           <Pressable style={styles.templateIconCircle} onPress={() => setActiveTab("profile")}>
             <MaterialCommunityIcons
@@ -1164,139 +1262,396 @@ export default function App() {
           </Pressable>
         </View>
 
-        <View style={styles.mapCard}>
-          <MapView style={styles.trackingMapView} initialRegion={mapRegion}>
-            <Marker
-              coordinate={{
-                latitude: rideHome.userLocation.lat,
-                longitude: rideHome.userLocation.lng,
-              }}
-              title="Vous"
-              description={rideHome.userLocation.address}
-              pinColor="#111827"
-            />
-            {selectedDestination ? (
-              <Marker
-                coordinate={{
-                  latitude: selectedDestination.lat,
-                  longitude: selectedDestination.lng,
-                }}
-                title={selectedDestination.title}
-                description={selectedDestination.address}
-                pinColor={templatePalette.primaryDark}
-              />
-            ) : null}
-          </MapView>
+        <View style={styles.gojekHeaderCard}>
+          <Text style={styles.gojekHeaderTitle}>Quick services</Text>
+          <View style={styles.gojekServiceGrid}>
+            {gojekQuickServices.map((service) => (
+              <Pressable
+                key={service.key}
+                style={styles.gojekServiceItem}
+                onPress={() => setClientMode(service.target)}
+              >
+                <View
+                  style={[
+                    styles.gojekServiceIconWrap,
+                    service.target === "uber" ? styles.gojekUberIcon : styles.gojekGlovoIcon,
+                  ]}
+                >
+                  <MaterialCommunityIcons name={service.icon} size={18} color="#FFFFFF" />
+                </View>
+                <Text style={styles.gojekServiceLabel}>{service.label}</Text>
+              </Pressable>
+            ))}
+          </View>
         </View>
-
-        <View style={styles.searchBox}>
-          <MaterialCommunityIcons name="magnify" size={18} color="#6B7280" />
-          <TextInput
-            value={rideSearchQuery}
-            onChangeText={(value) => void searchRideDestinations(value)}
-            placeholder={rideHome.whereToLabel}
-            placeholderTextColor="#94A3B8"
-            style={styles.searchInput}
-          />
-        </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          {rideHome.quickSuggestions.map((suggestion) => (
-            <Pressable
-              key={suggestion}
-              style={styles.templateCategoryChip}
-              onPress={() => void searchRideDestinations(suggestion)}
-            >
-              <Text style={styles.templateCategoryText}>{suggestion}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
 
         <View style={styles.rowActions}>
-          {rideHome.shortcuts.home ? (
-            <Pressable
-              style={styles.smallAction}
-              onPress={() =>
-                void loadRideOptions({
-                  title: "Home",
-                  address: rideHome.shortcuts.home!.address,
-                  lat: rideHome.shortcuts.home!.lat,
-                  lng: rideHome.shortcuts.home!.lng,
-                })
-              }
-            >
-              <Text style={styles.smallActionText}>Home</Text>
-            </Pressable>
-          ) : null}
-          {rideHome.shortcuts.work ? (
-            <Pressable
-              style={styles.smallAction}
-              onPress={() =>
-                void loadRideOptions({
-                  title: "Work",
-                  address: rideHome.shortcuts.work!.address,
-                  lat: rideHome.shortcuts.work!.lat,
-                  lng: rideHome.shortcuts.work!.lng,
-                })
-              }
-            >
-              <Text style={styles.smallActionText}>Work</Text>
-            </Pressable>
-          ) : null}
-          {rideHome.shortcuts.saved[0] ? (
-            <Pressable
-              style={styles.smallAction}
-              onPress={() =>
-                void loadRideOptions({
-                  title: "Saved",
-                  address: rideHome.shortcuts.saved[0]!.address,
-                  lat: rideHome.shortcuts.saved[0]!.lat,
-                  lng: rideHome.shortcuts.saved[0]!.lng,
-                })
-              }
-            >
-              <Text style={styles.smallActionText}>Saved</Text>
-            </Pressable>
-          ) : null}
+          <Pressable
+            style={[
+              styles.smallAction,
+              clientMode === "uber" ? styles.smallActionSelected : null,
+            ]}
+            onPress={() => setClientMode("uber")}
+          >
+            <Text style={styles.smallActionText}>Uber mode</Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.smallAction,
+              clientMode === "glovo" ? styles.smallActionSelected : null,
+            ]}
+            onPress={() => setClientMode("glovo")}
+          >
+            <Text style={styles.smallActionText}>Glovo mode</Text>
+          </Pressable>
         </View>
 
-        {rideSearchResults?.results.map((result, index) => (
-          <Pressable
-            key={`${result.address}-${index}`}
-            style={styles.infoCard}
-            onPress={() => void loadRideOptions(result)}
-          >
-            <Text style={styles.infoCardTitle}>{result.title}</Text>
-            <Text style={styles.infoCardText}>{result.address}</Text>
-          </Pressable>
-        ))}
+        {clientMode === "uber" ? (
+          <>
+            {mapRegion ? (
+              <View style={styles.mapCard}>
+                <MapView style={styles.trackingMapView} initialRegion={mapRegion}>
+                  <Marker
+                    coordinate={{
+                      latitude: rideHome.userLocation.lat,
+                      longitude: rideHome.userLocation.lng,
+                    }}
+                    title="Vous"
+                    description={rideHome.userLocation.address}
+                    pinColor="#111827"
+                  />
+                  {selectedDestination ? (
+                    <Marker
+                      coordinate={{
+                        latitude: selectedDestination.lat,
+                        longitude: selectedDestination.lng,
+                      }}
+                      title={selectedDestination.title}
+                      description={selectedDestination.address}
+                      pinColor={templatePalette.primaryDark}
+                    />
+                  ) : null}
+                </MapView>
+              </View>
+            ) : null}
 
-        <Text style={styles.sectionSubtitle}>Historique recent</Text>
-        {rideHome.recent.map((entry) => (
-          <View key={entry.id} style={styles.infoCard}>
-            <Text style={styles.infoCardTitle}>{entry.destination}</Text>
-            <Text style={styles.infoCardText}>
-              {entry.serviceType} · {entry.status} · {money(entry.amount)}
-            </Text>
-          </View>
-        ))}
+            <View style={styles.searchBox}>
+              <MaterialCommunityIcons name="magnify" size={18} color="#6B7280" />
+              <TextInput
+                value={rideSearchQuery}
+                onChangeText={(value) => void searchRideDestinations(value)}
+                placeholder={rideHome.whereToLabel}
+                placeholderTextColor="#94A3B8"
+                style={styles.searchInput}
+              />
+            </View>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {rideHome.quickSuggestions.map((suggestion) => (
+                <Pressable
+                  key={suggestion}
+                  style={styles.templateCategoryChip}
+                  onPress={() => void searchRideDestinations(suggestion)}
+                >
+                  <Text style={styles.templateCategoryText}>{suggestion}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+
+            <View style={styles.rowActions}>
+              {homeShortcut ? (
+                <Pressable
+                  style={styles.smallAction}
+                  onPress={() =>
+                    void loadRideOptions({
+                      title: "Home",
+                      address: homeShortcut.address,
+                      lat: homeShortcut.lat,
+                      lng: homeShortcut.lng,
+                    })
+                  }
+                >
+                  <Text style={styles.smallActionText}>Home</Text>
+                </Pressable>
+              ) : null}
+              {workShortcut ? (
+                <Pressable
+                  style={styles.smallAction}
+                  onPress={() =>
+                    void loadRideOptions({
+                      title: "Work",
+                      address: workShortcut.address,
+                      lat: workShortcut.lat,
+                      lng: workShortcut.lng,
+                    })
+                  }
+                >
+                  <Text style={styles.smallActionText}>Work</Text>
+                </Pressable>
+              ) : null}
+              {savedShortcut ? (
+                <Pressable
+                  style={styles.smallAction}
+                  onPress={() =>
+                    void loadRideOptions({
+                      title: "Saved",
+                      address: savedShortcut.address,
+                      lat: savedShortcut.lat,
+                      lng: savedShortcut.lng,
+                    })
+                  }
+                >
+                  <Text style={styles.smallActionText}>Saved</Text>
+                </Pressable>
+              ) : null}
+            </View>
+
+            {rideSearchResults?.results.map((result, index) => (
+              <Pressable
+                key={`${result.address}-${index}`}
+                style={styles.infoCard}
+                onPress={() => void loadRideOptions(result)}
+              >
+                <Text style={styles.infoCardTitle}>{result.title}</Text>
+                <Text style={styles.infoCardText}>{result.address}</Text>
+              </Pressable>
+            ))}
+
+            <Text style={styles.sectionSubtitle}>Historique recent</Text>
+            {rideHome.recent.map((entry) => (
+              <View key={entry.id} style={styles.infoCard}>
+                <Text style={styles.infoCardTitle}>{entry.destination}</Text>
+                <Text style={styles.infoCardText}>
+                  {entry.serviceType} · {entry.status} · {money(entry.amount)}
+                </Text>
+              </View>
+            ))}
+          </>
+        ) : (
+          <>
+            <View style={styles.searchBox}>
+              <MaterialCommunityIcons name="magnify" size={18} color="#6B7280" />
+              <TextInput
+                value={searchValue}
+                onChangeText={setSearchValue}
+                placeholder="Rechercher restos, produits, categories..."
+                placeholderTextColor="#94A3B8"
+                style={styles.searchInput}
+              />
+            </View>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.templateCategoriesContainer}
+            >
+              {categories.map((category) => {
+                const selected = category === selectedCategory;
+                return (
+                  <Pressable
+                    key={category}
+                    style={[
+                      styles.templateCategoryChip,
+                      selected ? styles.templateCategoryChipActive : null,
+                    ]}
+                    onPress={() => setSelectedCategory(category)}
+                  >
+                    <MaterialCommunityIcons
+                      name={categoryIconFor(category)}
+                      size={16}
+                      color={selected ? "#111827" : "#6B7280"}
+                    />
+                    <Text
+                      style={[
+                        styles.templateCategoryText,
+                        selected ? styles.templateCategoryTextActive : null,
+                      ]}
+                    >
+                      {category}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
+            {gojekPromoEvents.map((event) => (
+              <View key={event.title} style={styles.infoCard}>
+                <Text style={styles.infoCardTitle}>{event.title}</Text>
+                <Text style={styles.infoCardText}>{event.description}</Text>
+              </View>
+            ))}
+
+            <Text style={styles.templateSectionLabel}>Restaurants & commerces</Text>
+            {filteredStores.map((store) => (
+              <Pressable
+                key={store.id}
+                style={styles.templateStoreRowCard}
+                onPress={() => void openStore(store.id)}
+              >
+                <Image source={{ uri: store.imageUrl }} style={styles.templateStoreThumb} />
+                <View style={styles.templateStoreContent}>
+                  <View style={styles.rowBetween}>
+                    <Text style={styles.templateStoreName}>{store.name}</Text>
+                    <View style={styles.templateRatingPill}>
+                      <MaterialCommunityIcons name="star" size={12} color="#111827" />
+                      <Text style={styles.templateRatingText}>{store.rating.toFixed(1)}</Text>
+                    </View>
+                  </View>
+                  <Text numberOfLines={2} style={styles.templateStoreDesc}>
+                    {store.description}
+                  </Text>
+                  <View style={styles.rowActions}>
+                    <View style={styles.templateMetaPill}>
+                      <MaterialCommunityIcons name="clock-outline" size={12} color="#6B7280" />
+                      <Text style={styles.templateMetaText}>{store.etaMinutes} min</Text>
+                    </View>
+                    <View style={styles.templateMetaPill}>
+                      <MaterialCommunityIcons name="bike-fast" size={12} color="#6B7280" />
+                      <Text style={styles.templateMetaText}>{money(store.deliveryFee)}</Text>
+                    </View>
+                  </View>
+                </View>
+              </Pressable>
+            ))}
+
+            {filteredStores.length === 0 ? (
+              <View style={styles.emptyBox}>
+                <MaterialCommunityIcons
+                  name="store-search-outline"
+                  size={28}
+                  color={templatePalette.primaryDark}
+                />
+                <Text style={styles.emptyBoxText}>
+                  Aucun restaurant pour cette recherche.
+                </Text>
+              </View>
+            ) : null}
+          </>
+        )}
       </ScrollView>
     );
   };
 
   const renderClientCart = () => (
     <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
-      <Text style={styles.sectionTitle}>Selection du trajet & paiement</Text>
-      {!selectedDestination ? (
+      <Text style={styles.sectionTitle}>
+        {clientMode === "uber" ? "Selection du trajet & paiement" : "Panier Glovo"}
+      </Text>
+      <View style={styles.rowActions}>
+        <Pressable
+          style={[
+            styles.smallAction,
+            clientMode === "uber" ? styles.smallActionSelected : null,
+          ]}
+          onPress={() => setClientMode("uber")}
+        >
+          <Text style={styles.smallActionText}>Uber</Text>
+        </Pressable>
+        <Pressable
+          style={[
+            styles.smallAction,
+            clientMode === "glovo" ? styles.smallActionSelected : null,
+          ]}
+          onPress={() => setClientMode("glovo")}
+        >
+          <Text style={styles.smallActionText}>Glovo</Text>
+        </Pressable>
+      </View>
+
+      {clientMode === "glovo" ? (
+        <>
+          <Text style={styles.supportingText}>
+            {cartStore ? `${cartStore.name} · ${cartStore.category}` : "Panier vide"}
+          </Text>
+
+          {cartItems.length === 0 ? (
+            <View style={styles.emptyBox}>
+              <MaterialCommunityIcons
+                name="cart-outline"
+                size={30}
+                color={templatePalette.primaryDark}
+              />
+              <Text style={styles.emptyBoxText}>Ajoute des produits depuis Glovo mode</Text>
+            </View>
+          ) : (
+            <>
+              {cartItems.map((item) => (
+                <View key={item.product.id} style={styles.cartItemCard}>
+                  <Image source={{ uri: item.product.imageUrl }} style={styles.cartItemImage} />
+                  <View style={styles.cartItemContent}>
+                    <Text style={styles.cartItemName}>{item.product.name}</Text>
+                    <Text style={styles.cartItemPrice}>{money(item.product.price)}</Text>
+                  </View>
+                  <View style={styles.quantityControls}>
+                    <Pressable
+                      style={styles.quantityButton}
+                      onPress={() => changeCartQuantity(item.product.id, -1)}
+                    >
+                      <MaterialCommunityIcons name="minus" size={16} color="#1F2937" />
+                    </Pressable>
+                    <Text style={styles.quantityValue}>{item.quantity}</Text>
+                    <Pressable
+                      style={styles.quantityButton}
+                      onPress={() => changeCartQuantity(item.product.id, 1)}
+                    >
+                      <MaterialCommunityIcons name="plus" size={16} color="#1F2937" />
+                    </Pressable>
+                  </View>
+                </View>
+              ))}
+
+              <View style={styles.addressCard}>
+                <Text style={styles.addressTitle}>Adresse livraison</Text>
+                <TextInput
+                  value={addressText}
+                  onChangeText={setAddressText}
+                  placeholder="Adresse de livraison"
+                  placeholderTextColor="#94A3B8"
+                  style={styles.addressInput}
+                />
+              </View>
+
+              <View style={styles.pricingCard}>
+                <View style={styles.rowBetween}>
+                  <Text style={styles.pricingLabel}>Sous-total</Text>
+                  <Text style={styles.pricingValue}>{money(cartSubtotal)}</Text>
+                </View>
+                <View style={styles.rowBetween}>
+                  <Text style={styles.pricingLabel}>Livraison</Text>
+                  <Text style={styles.pricingValue}>{money(cartDeliveryFee)}</Text>
+                </View>
+                <View style={styles.separator} />
+                <View style={styles.rowBetween}>
+                  <Text style={styles.pricingTotalLabel}>Total</Text>
+                  <Text style={styles.pricingTotalValue}>{money(cartTotal)}</Text>
+                </View>
+              </View>
+
+              <Pressable
+                style={[
+                  styles.checkoutButton,
+                  processingCheckout ? styles.checkoutButtonDisabled : null,
+                ]}
+                onPress={() => void checkout()}
+                disabled={processingCheckout}
+              >
+                {processingCheckout ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.checkoutButtonText}>Commander + paiement instantane</Text>
+                )}
+              </Pressable>
+            </>
+          )}
+        </>
+      ) : !selectedDestination ? (
         <View style={styles.emptyBox}>
           <MaterialCommunityIcons
             name="car-estate"
             size={30}
             color={templatePalette.primaryDark}
           />
-          <Text style={styles.emptyBoxText}>
-            Choisis d'abord une destination dans l'onglet Ride.
-          </Text>
+          <Text style={styles.emptyBoxText}>Choisis une destination dans l'onglet Ride.</Text>
         </View>
       ) : (
         <>
@@ -1386,7 +1741,8 @@ export default function App() {
                 </Text>
               </View>
               <Text style={styles.infoCardText}>
-                {ride.serviceType} · {ride.status} · {new Date(ride.createdAt).toLocaleString("fr-FR")}
+                {ride.serviceType} · {ride.status} ·{" "}
+                {new Date(ride.createdAt).toLocaleString("fr-FR")}
               </Text>
             </Pressable>
           ))}
@@ -1407,7 +1763,7 @@ export default function App() {
   );
 
   const renderClientTracking = () => {
-    const routePoints =
+    const rideRoutePoints =
       activeRideTracking !== null
         ? [
             {
@@ -1424,13 +1780,52 @@ export default function App() {
             },
           ]
         : [];
-    const trackingRegion = computeMapRegion(routePoints);
+    const rideTrackingRegion = computeMapRegion(rideRoutePoints);
+
+    const orderRoutePoints =
+      tracking !== null
+        ? [
+            {
+              latitude: tracking.pickup.lat,
+              longitude: tracking.pickup.lng,
+            },
+            {
+              latitude: tracking.position.lat,
+              longitude: tracking.position.lng,
+            },
+            {
+              latitude: tracking.destination.lat,
+              longitude: tracking.destination.lng,
+            },
+          ]
+        : [];
+    const orderTrackingRegion = computeMapRegion(orderRoutePoints);
 
     return (
       <ScrollView style={styles.screen} showsVerticalScrollIndicator={false}>
-        <Text style={styles.sectionTitle}>Chauffeur en route / Trajet en cours</Text>
+        <Text style={styles.sectionTitle}>Suivi temps reel Uber + Glovo</Text>
+        <View style={styles.rowActions}>
+          <Pressable
+            style={[
+              styles.smallAction,
+              clientMode === "uber" ? styles.smallActionSelected : null,
+            ]}
+            onPress={() => setClientMode("uber")}
+          >
+            <Text style={styles.smallActionText}>Uber</Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.smallAction,
+              clientMode === "glovo" ? styles.smallActionSelected : null,
+            ]}
+            onPress={() => setClientMode("glovo")}
+          >
+            <Text style={styles.smallActionText}>Glovo</Text>
+          </Pressable>
+        </View>
 
-        {!activeRide || !activeRideTracking ? (
+        {clientMode === "uber" ? !activeRide || !activeRideTracking ? (
           <View style={styles.emptyBox}>
             <MaterialCommunityIcons
               name="car-connected"
@@ -1454,7 +1849,7 @@ export default function App() {
 
             <View style={styles.mapCard}>
               <Text style={styles.mapCardTitle}>Position live</Text>
-              <MapView style={styles.trackingMapView} initialRegion={trackingRegion}>
+              <MapView style={styles.trackingMapView} initialRegion={rideTrackingRegion}>
                 <Marker
                   coordinate={{
                     latitude: activeRideTracking.pickup.lat,
@@ -1480,7 +1875,7 @@ export default function App() {
                   description={activeRideTracking.driver?.vehicle ?? "En route"}
                   pinColor="#22C55E"
                 />
-                <Polyline coordinates={routePoints} strokeColor="#111827" strokeWidth={3} />
+                <Polyline coordinates={rideRoutePoints} strokeColor="#111827" strokeWidth={3} />
               </MapView>
               <Text style={styles.mapCoordinate}>Depart: {activeRideTracking.pickup.text}</Text>
               <Text style={styles.mapCoordinate}>
@@ -1519,6 +1914,81 @@ export default function App() {
                 <Text style={styles.cancelButtonText}>Annuler la course</Text>
               </Pressable>
             )}
+          </>
+        ) : !orderId || !orderDetails || !tracking ? (
+          <View style={styles.emptyBox}>
+            <MaterialCommunityIcons
+              name="map-marker-path"
+              size={30}
+              color={templatePalette.primaryDark}
+            />
+            <Text style={styles.emptyBoxText}>
+              Pas de commande Glovo active. Passe une commande depuis Glovo mode.
+            </Text>
+          </View>
+        ) : (
+          <>
+            <LinearGradient colors={["#FFF3C4", "#FFF7D6"]} style={styles.trackingHero}>
+              <Text style={styles.trackingStatus}>{orderDetails.statusLabel}</Text>
+              <Text style={styles.trackingEta}>Paiement: {orderDetails.paymentStatus}</Text>
+              <Text style={styles.trackingEta}>ETA {tracking.etaMinutes} min</Text>
+              <Text style={styles.trackingOrder}>#{orderDetails.id.slice(0, 8)}</Text>
+            </LinearGradient>
+
+            <View style={styles.mapCard}>
+              <Text style={styles.mapCardTitle}>Position livreur</Text>
+              <MapView style={styles.trackingMapView} initialRegion={orderTrackingRegion}>
+                <Marker
+                  coordinate={{
+                    latitude: tracking.pickup.lat,
+                    longitude: tracking.pickup.lng,
+                  }}
+                  title={tracking.pickup.name}
+                  pinColor="#111827"
+                />
+                <Marker
+                  coordinate={{
+                    latitude: tracking.destination.lat,
+                    longitude: tracking.destination.lng,
+                  }}
+                  title={tracking.destination.text}
+                  pinColor={templatePalette.primaryDark}
+                />
+                <Marker
+                  coordinate={{
+                    latitude: tracking.position.lat,
+                    longitude: tracking.position.lng,
+                  }}
+                  title={tracking.courier?.name ?? "Livreur"}
+                  description={tracking.courier?.vehicle ?? "En route"}
+                  pinColor="#22C55E"
+                />
+                <Polyline coordinates={orderRoutePoints} strokeColor="#111827" strokeWidth={3} />
+              </MapView>
+              <Text style={styles.mapCoordinate}>Depart: {tracking.pickup.name}</Text>
+              <Text style={styles.mapCoordinate}>Arrivee: {tracking.destination.text}</Text>
+            </View>
+
+            <Text style={styles.sectionSubtitle}>Timeline</Text>
+            {orderDetails.timeline.map((event) => (
+              <View key={event.id} style={styles.timelineItem}>
+                <View style={styles.timelineDot} />
+                <View>
+                  <Text style={styles.timelineLabel}>{event.label}</Text>
+                  <Text style={styles.timelineTimestamp}>
+                    {new Date(event.timestamp).toLocaleTimeString("fr-FR")}
+                  </Text>
+                </View>
+              </View>
+            ))}
+
+            {orderDetails.status !== "DELIVERED" &&
+            orderDetails.status !== "CANCELLED" &&
+            orderDetails.status !== "REFUSED" ? (
+              <Pressable style={styles.cancelButton} onPress={() => void cancelOrder()}>
+                <Text style={styles.cancelButtonText}>Annuler la commande</Text>
+              </Pressable>
+            ) : null}
           </>
         )}
       </ScrollView>
@@ -3288,6 +3758,48 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     gap: 5,
   },
+  gojekHeaderCard: {
+    borderRadius: 16,
+    backgroundColor: gojekPalette.lightGrey,
+    borderWidth: 1,
+    borderColor: gojekPalette.grey,
+    padding: 12,
+    marginBottom: 10,
+  },
+  gojekHeaderTitle: {
+    color: gojekPalette.darkGreen,
+    fontWeight: "800",
+    marginBottom: 10,
+  },
+  gojekServiceGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  gojekServiceItem: {
+    width: "22%",
+    alignItems: "center",
+  },
+  gojekServiceIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 4,
+  },
+  gojekUberIcon: {
+    backgroundColor: templatePalette.primaryDark,
+  },
+  gojekGlovoIcon: {
+    backgroundColor: gojekPalette.green,
+  },
+  gojekServiceLabel: {
+    color: "#1F2937",
+    fontSize: 11,
+    fontWeight: "600",
+    textAlign: "center",
+  },
   infoCardTitle: {
     color: "#111827",
     fontWeight: "700",
@@ -3321,6 +3833,9 @@ const styles = StyleSheet.create({
     borderColor: templatePalette.primaryDark,
     paddingVertical: 8,
     paddingHorizontal: 12,
+  },
+  smallActionSelected: {
+    backgroundColor: "#FEF3C7",
   },
   smallActionDanger: {
     borderColor: "#EF4444",

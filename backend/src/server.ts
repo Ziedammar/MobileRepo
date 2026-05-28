@@ -276,6 +276,13 @@ const adminUserStatusSchema = z.object({
   accessStatus: z.nativeEnum(UserAccessStatus),
 });
 
+const broadcastNotificationSchema = z.object({
+  channels: z.array(z.enum(["PUSH", "SMS", "EMAIL"])).min(1),
+  title: z.string().trim().min(2).max(120),
+  body: z.string().trim().min(2).max(500),
+  userIds: z.array(z.string().cuid()).optional(),
+});
+
 const orderDetailsInclude = {
   user: {
     select: {
@@ -3457,6 +3464,34 @@ app.get("/admin/orders", async (request, reply) => {
   return orders;
 });
 
+app.get("/admin/rides/live", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+    ensureRole(auth, [UserRole.ADMIN, UserRole.SUPER_ADMIN]);
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const rides = await prisma.ride.findMany({
+    where: {
+      status: {
+        in: [RideStatus.PENDING, RideStatus.ACCEPTED, RideStatus.ONGOING],
+      },
+    },
+    orderBy: { updatedAt: "desc" },
+    take: 100,
+  });
+
+  return rides;
+});
+
 app.patch("/admin/orders/:orderId/decision", async (request, reply) => {
   let auth: AuthTokenPayload;
   try {
@@ -3939,6 +3974,115 @@ app.get("/super-admin/dashboard", async (request, reply) => {
   }
 
   return computeSuperAdminDashboard();
+});
+
+app.get("/super-admin/users/:userId/sessions", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+    ensureRole(auth, [UserRole.SUPER_ADMIN]);
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const params = z.object({ userId: z.string().cuid() }).parse(request.params);
+  const sessions = await prisma.authSession.findMany({
+    where: { userId: params.userId },
+    orderBy: { createdAt: "desc" },
+    take: 60,
+    select: {
+      id: true,
+      userId: true,
+      userAgent: true,
+      ipAddress: true,
+      expiresAt: true,
+      revokedAt: true,
+      lastUsedAt: true,
+      createdAt: true,
+    },
+  });
+
+  return sessions;
+});
+
+app.delete("/super-admin/users/:userId/sessions", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+    ensureRole(auth, [UserRole.SUPER_ADMIN]);
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const params = z.object({ userId: z.string().cuid() }).parse(request.params);
+  const result = await prisma.authSession.updateMany({
+    where: { userId: params.userId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+  return { revokedSessions: result.count };
+});
+
+app.post("/super-admin/notifications/broadcast", async (request, reply) => {
+  let auth: AuthTokenPayload;
+  try {
+    auth = (await getAuthFromRequest(request, {
+      required: true,
+      activeOnly: true,
+    }))!;
+    ensureRole(auth, [UserRole.SUPER_ADMIN]);
+  } catch (error) {
+    if (handleAuthError(error, reply)) {
+      return;
+    }
+    throw error;
+  }
+
+  const body = broadcastNotificationSchema.parse(request.body);
+  const users = body.userIds?.length
+    ? await prisma.user.findMany({
+        where: {
+          id: { in: body.userIds },
+          accessStatus: UserAccessStatus.ACTIVE,
+        },
+        select: { id: true },
+      })
+    : await prisma.user.findMany({
+        where: { accessStatus: UserAccessStatus.ACTIVE },
+        select: { id: true },
+      });
+
+  if (users.length === 0) {
+    return reply.status(404).send({ message: "No active users for broadcast" });
+  }
+
+  await prisma.userNotification.createMany({
+    data: users.map((user) => ({
+      userId: user.id,
+      type: NotificationType.SYSTEM,
+      title: body.title,
+      body: body.body,
+      payloadJson: JSON.stringify({ channels: body.channels }),
+    })),
+  });
+
+  return {
+    sentToUsers: users.length,
+    channels: body.channels,
+    message:
+      "Broadcast notifications enregistrees (mode simulation PUSH/SMS/EMAIL)",
+  };
 });
 
 app.get("/super-admin/stores", async (request, reply) => {

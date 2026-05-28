@@ -10,8 +10,8 @@
     "typecheck": "npm run typecheck --workspace @livraison/backend && npm run typecheck --workspace @livraison/mobile"
   },
   "workspaces": [
-    "apps/backend",
-    "apps/mobile"
+    "backend",
+    "frontend"
   ],
   "repository": {
     "type": "git",
