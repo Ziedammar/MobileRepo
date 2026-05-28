@@ -84,6 +84,21 @@ const signupRoles: Array<{
   { role: "LIVREUR", label: "Livreur", icon: "motorbike" },
 ];
 
+const aberOnboardingSlides = [
+  {
+    title: "Setup GPS locations",
+    subtitle: "Active ta localisation pour un pickup precis et ETA fiable.",
+  },
+  {
+    title: "Choose drop-off",
+    subtitle: "Selectionne ta destination et compare les options de course.",
+  },
+  {
+    title: "Track, pay, rate",
+    subtitle: "Suivi live, paiement instantane, note et pourboire en fin de trajet.",
+  },
+];
+
 const clientTabs: Array<{
   key: TabKey;
   label: string;
@@ -245,6 +260,7 @@ export default function App() {
   const [authStoreName, setAuthStoreName] = useState("Mon Restaurant");
   const [authVehicle, setAuthVehicle] = useState("Scooter");
   const [authLoading, setAuthLoading] = useState(false);
+  const [onboardingPage, setOnboardingPage] = useState(0);
 
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [processingCheckout, setProcessingCheckout] = useState(false);
@@ -264,10 +280,14 @@ export default function App() {
   const [rideOptions, setRideOptions] = useState<RideOption[]>([]);
   const [rideOptionsMeta, setRideOptionsMeta] = useState<RideOptionsResponse | null>(null);
   const [selectedRideOption, setSelectedRideOption] = useState<RideOption | null>(null);
+  const [selectedDriverPreview, setSelectedDriverPreview] = useState<string | null>(null);
   const [activeRide, setActiveRide] = useState<Ride | null>(null);
   const [activeRideTracking, setActiveRideTracking] = useState<RideTrackingResponse | null>(
     null,
   );
+  const [tripRating, setTripRating] = useState(5);
+  const [tripTip, setTripTip] = useState(0);
+  const [tripFeedbackSent, setTripFeedbackSent] = useState(false);
   const [rideHistory, setRideHistory] = useState<Ride[]>([]);
   const [paymentMethods, setPaymentMethods] = useState<UserPaymentMethod[]>([]);
   const [selectedPaymentMethod, setSelectedPaymentMethod] =
@@ -570,6 +590,7 @@ export default function App() {
       setRideOptions(options.options);
       setRideOptionsMeta(options);
       setSelectedRideOption(options.options[0] ?? null);
+      setSelectedDriverPreview(null);
       setActiveTab("cart");
     } catch (error) {
       setErrorMessage(errorText(error));
@@ -594,7 +615,14 @@ export default function App() {
         promoCode: couponCode.trim() ? couponCode.trim() : undefined,
       });
       setActiveRide(createdRide);
-      setInfoMessage("Trajet cree avec succes");
+      setTripFeedbackSent(false);
+      setTripTip(0);
+      setTripRating(5);
+      setInfoMessage(
+        selectedDriverPreview
+          ? `Trajet cree avec succes · preference chauffeur: ${selectedDriverPreview}`
+          : "Trajet cree avec succes",
+      );
       setActiveTab("tracking");
       await refreshRideContext();
     } catch (error) {
@@ -667,6 +695,16 @@ export default function App() {
     } catch (error) {
       setErrorMessage(errorText(error));
     }
+  };
+
+  const submitTripFeedback = () => {
+    if (!activeRide) {
+      return;
+    }
+    setTripFeedbackSent(true);
+    setInfoMessage(
+      `Merci! Note ${tripRating}/5 enregistree${tripTip > 0 ? ` avec pourboire ${money(tripTip)}` : ""}.`,
+    );
   };
 
   useEffect(() => {
@@ -1162,6 +1200,33 @@ export default function App() {
 
   const hasNativeMap =
     mapModule.MapView !== null && mapModule.Marker !== null && mapModule.Polyline !== null;
+
+  const driverCandidates = useMemo(() => {
+    if (!selectedRideOption || !selectedDestination) {
+      return [];
+    }
+
+    const sampleByService: Record<string, Array<{ name: string; car: string; eta: string }>> = {
+      UBER_X: [
+        { name: "Ahmed K.", car: "Toyota Yaris", eta: "3 min" },
+        { name: "Sarra M.", car: "Hyundai i10", eta: "4 min" },
+      ],
+      COMFORT: [
+        { name: "Nour B.", car: "Kia Cerato", eta: "5 min" },
+        { name: "Omar R.", car: "Renault Megane", eta: "6 min" },
+      ],
+      BLACK: [
+        { name: "Khaled T.", car: "Mercedes C200", eta: "7 min" },
+        { name: "Yassine H.", car: "BMW Serie 3", eta: "8 min" },
+      ],
+      XL: [
+        { name: "Moez A.", car: "Hyundai H1", eta: "6 min" },
+        { name: "Rim S.", car: "Peugeot Traveller", eta: "7 min" },
+      ],
+    };
+
+    return sampleByService[selectedRideOption.serviceType] ?? sampleByService.UBER_X;
+  }, [selectedRideOption, selectedDestination]);
 
   const renderClientHome = () => {
     if (clientMode === "glovo" && selectedStore) {
@@ -1836,10 +1901,14 @@ export default function App() {
       ) : (
         <>
           <View style={styles.infoCard}>
-            <Text style={styles.infoCardTitle}>{selectedDestination.address}</Text>
+            <Text style={styles.infoCardTitle}>Choose drop-off</Text>
+            <Text style={styles.infoCardText}>{selectedDestination.address}</Text>
             <Text style={styles.infoCardText}>
-              Distance: {rideOptionsMeta?.distanceKm.toFixed(2) ?? "0.00"} km
+              Distance estimee: {rideOptionsMeta?.distanceKm.toFixed(2) ?? "0.00"} km
             </Text>
+            <Pressable style={styles.smallAction} onPress={() => setActiveTab("home")}>
+              <Text style={styles.smallActionText}>Modifier destination</Text>
+            </Pressable>
           </View>
 
           {rideOptions.map((option) => (
@@ -1869,7 +1938,7 @@ export default function App() {
           ))}
 
           <View style={styles.infoCard}>
-            <Text style={styles.infoCardTitle}>Moyen de paiement</Text>
+            <Text style={styles.infoCardTitle}>Input promo code + Payment method</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {(["CARD", "APPLE_PAY", "GOOGLE_PAY", "CASH"] as PaymentMethodType[]).map(
                 (method) => (
@@ -1891,19 +1960,117 @@ export default function App() {
             <TextInput
               value={couponCode}
               onChangeText={setCouponCode}
-              placeholder="Coupon / promo code"
+              placeholder="Input promo code"
               placeholderTextColor="#94A3B8"
               style={styles.authInput}
             />
+          </View>
+
+          <View style={styles.infoCard}>
+            <Text style={styles.infoCardTitle}>Select driver</Text>
+            {driverCandidates.map((driver) => (
+              <Pressable
+                key={driver.name}
+                style={[
+                  styles.addressResultCard,
+                  selectedDriverPreview === driver.name ? styles.rideOptionCardActive : null,
+                ]}
+                onPress={() => setSelectedDriverPreview(driver.name)}
+              >
+                <View style={styles.addressResultIcon}>
+                  <MaterialCommunityIcons name="account-circle-outline" size={16} color="#111827" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.infoCardTitle}>{driver.name}</Text>
+                  <Text style={styles.infoCardText}>
+                    {driver.car} · {driver.eta}
+                  </Text>
+                </View>
+                <MaterialCommunityIcons
+                  name={
+                    selectedDriverPreview === driver.name
+                      ? "check-circle-outline"
+                      : "circle-outline"
+                  }
+                  size={18}
+                  color={selectedDriverPreview === driver.name ? "#16A34A" : "#94A3B8"}
+                />
+              </Pressable>
+            ))}
             <View style={styles.rowActions}>
               <Pressable style={styles.smallAction} onPress={() => void requestRide()}>
-                <Text style={styles.smallActionText}>Confirmer trajet</Text>
+                <Text style={styles.smallActionText}>Book now</Text>
               </Pressable>
               <Pressable style={styles.smallAction} onPress={() => void payForRide()}>
-                <Text style={styles.smallActionText}>Payer maintenant</Text>
+                <Text style={styles.smallActionText}>Pay now</Text>
               </Pressable>
             </View>
           </View>
+
+          {activeRide ? (
+            <View style={styles.infoCard}>
+              <Text style={styles.infoCardTitle}>
+                {activeRide.status === "PENDING" || activeRide.status === "ACCEPTED"
+                  ? "Booking successfully"
+                  : "Booking details"}
+              </Text>
+              <Text style={styles.infoCardText}>
+                Driver: {activeRide.driverName ?? selectedDriverPreview ?? "Assignation en cours"}
+              </Text>
+              <Text style={styles.infoCardText}>
+                Vehicle: {activeRide.vehicleLabel ?? "Vehicle incoming"}
+              </Text>
+              <Text style={styles.infoCardText}>
+                Prix: {money(activeRide.finalPrice ?? activeRide.estimatedPrice)}
+              </Text>
+              <Pressable style={styles.smallAction} onPress={() => setActiveTab("tracking")}>
+                <Text style={styles.smallActionText}>Voir tracking details</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {activeRide?.status === "COMPLETED" ? (
+            <View style={styles.infoCard}>
+              <Text style={styles.infoCardTitle}>Rate your trip</Text>
+              <View style={styles.rowActions}>
+                {[1, 2, 3, 4, 5].map((value) => (
+                  <Pressable
+                    key={value}
+                    style={styles.templateIconCircle}
+                    onPress={() => setTripRating(value)}
+                  >
+                    <MaterialCommunityIcons
+                      name={value <= tripRating ? "star" : "star-outline"}
+                      size={16}
+                      color={value <= tripRating ? "#F59E0B" : "#94A3B8"}
+                    />
+                  </Pressable>
+                ))}
+              </View>
+              <Text style={styles.infoCardTitle}>Tips</Text>
+              <View style={styles.rowActions}>
+                {[0, 2, 5, 10].map((tip) => (
+                  <Pressable
+                    key={tip}
+                    style={[
+                      styles.templateCategoryChip,
+                      tripTip === tip ? styles.templateCategoryChipActive : null,
+                    ]}
+                    onPress={() => setTripTip(tip)}
+                  >
+                    <Text style={styles.templateCategoryText}>
+                      {tip === 0 ? "No tip" : money(tip)}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              <Pressable style={styles.smallAction} onPress={submitTripFeedback}>
+                <Text style={styles.smallActionText}>
+                  {tripFeedbackSent ? "Feedback envoye" : "Envoyer note"}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
 
           <Text style={styles.sectionSubtitle}>Historique trajets</Text>
           {rideHistory.map((ride) => (
@@ -2093,6 +2260,20 @@ export default function App() {
               <Text style={styles.mapCoordinate}>Depart: {activeRideTracking.pickup.text}</Text>
               <Text style={styles.mapCoordinate}>
                 Arrivee: {activeRideTracking.destination.text}
+              </Text>
+            </View>
+
+            <View style={styles.infoCard}>
+              <Text style={styles.infoCardTitle}>Booking details</Text>
+              <Text style={styles.infoCardText}>Status: {activeRide.status}</Text>
+              <Text style={styles.infoCardText}>
+                Driver: {activeRide.driverName ?? activeRideTracking.driver?.name ?? "N/A"}
+              </Text>
+              <Text style={styles.infoCardText}>
+                Vehicle: {activeRide.vehicleLabel ?? activeRideTracking.driver?.vehicle ?? "N/A"}
+              </Text>
+              <Text style={styles.infoCardText}>
+                ETA: {activeRideTracking.etaMinutes} min
               </Text>
             </View>
 
@@ -2728,6 +2909,24 @@ export default function App() {
       {currentUser?.role === "CLIENT" ? (
         <>
           <View style={styles.infoCard}>
+            <Text style={styles.infoCardTitle}>Menu</Text>
+            {[
+              "My History",
+              "Message",
+              "Notifications",
+              "Settings",
+              "My Account",
+              "My Wallet",
+              "Payment Method",
+            ].map((item) => (
+              <View key={item} style={styles.rowBetween}>
+                <Text style={styles.infoCardText}>{item}</Text>
+                <MaterialCommunityIcons name="chevron-right" size={16} color="#94A3B8" />
+              </View>
+            ))}
+          </View>
+
+          <View style={styles.infoCard}>
             <Text style={styles.infoCardTitle}>Moyens paiement</Text>
             {paymentMethods.length === 0 ? (
               <Text style={styles.infoCardText}>Aucune carte enregistree</Text>
@@ -2740,6 +2939,14 @@ export default function App() {
                 </Text>
               ))
             )}
+          </View>
+
+          <View style={styles.infoCard}>
+            <Text style={styles.infoCardTitle}>My Wallet</Text>
+            <Text style={styles.infoCardText}>
+              Total paiements: {money(paymentsHistory.reduce((sum, p) => sum + p.amount, 0))}
+            </Text>
+            <Text style={styles.infoCardText}>Transactions: {paymentsHistory.length}</Text>
           </View>
 
           <View style={styles.infoCard}>
@@ -2891,10 +3098,23 @@ export default function App() {
           <MaterialCommunityIcons name="car-side" size={20} color="#FFFFFF" />
           <Text style={styles.uberBrandPillText}>Uber style login</Text>
         </View>
-        <Text style={styles.uberBrandTitle}>Livraison Pro</Text>
-        <Text style={styles.uberBrandSubtitle}>
-          Sign in pour commander, suivre sur map, ou gerer ton restaurant.
+        <Text style={styles.uberBrandTitle}>Aber-style Taxi UI</Text>
+        <Text style={styles.uberBrandSubtitle}>{aberOnboardingSlides[onboardingPage]!.title}</Text>
+        <Text style={styles.uberBrandSubtitleSecondary}>
+          {aberOnboardingSlides[onboardingPage]!.subtitle}
         </Text>
+        <View style={styles.rowActions}>
+          {aberOnboardingSlides.map((_, idx) => (
+            <Pressable
+              key={idx}
+              style={[
+                styles.onboardingDot,
+                onboardingPage === idx ? styles.onboardingDotActive : null,
+              ]}
+              onPress={() => setOnboardingPage(idx)}
+            />
+          ))}
+        </View>
       </View>
 
       <View style={styles.uberAuthSheet}>
@@ -3164,6 +3384,24 @@ const styles = StyleSheet.create({
     marginTop: 8,
     lineHeight: 19,
     maxWidth: "90%",
+  },
+  uberBrandSubtitleSecondary: {
+    color: "#9CA3AF",
+    marginTop: 6,
+    lineHeight: 18,
+    maxWidth: "92%",
+    fontSize: 12,
+  },
+  onboardingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#4B5563",
+    marginTop: 8,
+  },
+  onboardingDotActive: {
+    backgroundColor: "#FFFFFF",
+    width: 18,
   },
   uberAuthSheet: {
     flex: 0.62,
