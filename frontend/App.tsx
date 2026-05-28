@@ -2,7 +2,6 @@ import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { StatusBar } from "expo-status-bar";
 import { LinearGradient } from "expo-linear-gradient";
 import React, { useEffect, useMemo, useState } from "react";
-import MapView, { Marker, Polyline } from "react-native-maps";
 import {
   Appbar,
   BottomNavigation,
@@ -151,6 +150,31 @@ const categoryIconFor = (category: string): keyof typeof MaterialCommunityIcons.
   return categoryIconMap[normalized] ?? "silverware-fork-knife";
 };
 
+type MapModule = {
+  MapView: React.ComponentType<any> | null;
+  Marker: React.ComponentType<any> | null;
+  Polyline: React.ComponentType<any> | null;
+};
+
+function getMapModule(): MapModule {
+  try {
+    const maps = require("react-native-maps");
+    return {
+      MapView: (maps.default ?? maps.MapView ?? null) as React.ComponentType<any> | null,
+      Marker: (maps.Marker ?? null) as React.ComponentType<any> | null,
+      Polyline: (maps.Polyline ?? null) as React.ComponentType<any> | null,
+    };
+  } catch {
+    return {
+      MapView: null,
+      Marker: null,
+      Polyline: null,
+    };
+  }
+}
+
+const mapModule = getMapModule();
+
 const computeMapRegion = (
   points: Array<{ latitude: number; longitude: number }>,
 ): {
@@ -205,6 +229,9 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState("Tous");
   const [searchValue, setSearchValue] = useState("");
   const [clientMode, setClientMode] = useState<ClientServiceMode>("uber");
+  const [glovoQuickFilter, setGlovoQuickFilter] = useState<
+    "ALL" | "FAST" | "TOP" | "LOW_FEE"
+  >("ALL");
 
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [sessionRefreshToken, setSessionRefreshToken] = useState<string | null>(null);
@@ -882,9 +909,14 @@ export default function App() {
         store.name.toLowerCase().includes(needle) ||
         store.description.toLowerCase().includes(needle) ||
         store.category.toLowerCase().includes(needle);
-      return categoryMatch && searchMatch;
+      const quickFilterMatch =
+        glovoQuickFilter === "ALL" ||
+        (glovoQuickFilter === "FAST" && store.etaMinutes <= 25) ||
+        (glovoQuickFilter === "TOP" && store.rating >= 4.6) ||
+        (glovoQuickFilter === "LOW_FEE" && store.deliveryFee <= 3);
+      return categoryMatch && searchMatch && quickFilterMatch;
     });
-  }, [home, selectedCategory, searchValue]);
+  }, [home, selectedCategory, searchValue, glovoQuickFilter]);
 
   const cartSubtotal = useMemo(
     () =>
@@ -1128,6 +1160,9 @@ export default function App() {
     return clientTabs;
   }, [currentUser]);
 
+  const hasNativeMap =
+    mapModule.MapView !== null && mapModule.Marker !== null && mapModule.Polyline !== null;
+
   const renderClientHome = () => {
     if (clientMode === "glovo" && selectedStore) {
       const customerPoint = {
@@ -1174,20 +1209,43 @@ export default function App() {
 
             <View style={styles.templateMapCard}>
               <Text style={styles.mapCardTitle}>Localisation partenaire</Text>
-              <MapView style={styles.templateMapView} initialRegion={storeRegion}>
-                <Marker coordinate={storePoint} title={selectedStore.name} pinColor="#111827" />
-                <Marker
-                  coordinate={customerPoint}
-                  title="Votre adresse"
-                  description={addressText}
-                  pinColor={templatePalette.primaryDark}
-                />
-                <Polyline
-                  coordinates={[storePoint, customerPoint]}
-                  strokeColor={templatePalette.primaryDark}
-                  strokeWidth={3}
-                />
-              </MapView>
+              {hasNativeMap && mapModule.MapView ? (
+                <mapModule.MapView style={styles.templateMapView} initialRegion={storeRegion}>
+                  {mapModule.Marker ? (
+                    <mapModule.Marker
+                      coordinate={storePoint}
+                      title={selectedStore.name}
+                      pinColor="#111827"
+                    />
+                  ) : null}
+                  {mapModule.Marker ? (
+                    <mapModule.Marker
+                      coordinate={customerPoint}
+                      title="Votre adresse"
+                      description={addressText}
+                      pinColor={templatePalette.primaryDark}
+                    />
+                  ) : null}
+                  {mapModule.Polyline ? (
+                    <mapModule.Polyline
+                      coordinates={[storePoint, customerPoint]}
+                      strokeColor={templatePalette.primaryDark}
+                      strokeWidth={3}
+                    />
+                  ) : null}
+                </mapModule.MapView>
+              ) : (
+                <View style={styles.mapFallbackCard}>
+                  <MaterialCommunityIcons
+                    name="map-outline"
+                    size={22}
+                    color={templatePalette.primaryDark}
+                  />
+                  <Text style={styles.mapFallbackText}>
+                    Carte indisponible dans Expo Go (utilise un Dev Build pour la map native).
+                  </Text>
+                </View>
+              )}
             </View>
 
             {selectedStore.products.map((product) => (
@@ -1310,28 +1368,43 @@ export default function App() {
           <>
             {mapRegion ? (
               <View style={styles.mapCard}>
-                <MapView style={styles.trackingMapView} initialRegion={mapRegion}>
-                  <Marker
-                    coordinate={{
-                      latitude: rideHome.userLocation.lat,
-                      longitude: rideHome.userLocation.lng,
-                    }}
-                    title="Vous"
-                    description={rideHome.userLocation.address}
-                    pinColor="#111827"
-                  />
-                  {selectedDestination ? (
-                    <Marker
-                      coordinate={{
-                        latitude: selectedDestination.lat,
-                        longitude: selectedDestination.lng,
-                      }}
-                      title={selectedDestination.title}
-                      description={selectedDestination.address}
-                      pinColor={templatePalette.primaryDark}
+                {hasNativeMap && mapModule.MapView ? (
+                  <mapModule.MapView style={styles.trackingMapView} initialRegion={mapRegion}>
+                    {mapModule.Marker ? (
+                      <mapModule.Marker
+                        coordinate={{
+                          latitude: rideHome.userLocation.lat,
+                          longitude: rideHome.userLocation.lng,
+                        }}
+                        title="Vous"
+                        description={rideHome.userLocation.address}
+                        pinColor="#111827"
+                      />
+                    ) : null}
+                    {selectedDestination && mapModule.Marker ? (
+                      <mapModule.Marker
+                        coordinate={{
+                          latitude: selectedDestination.lat,
+                          longitude: selectedDestination.lng,
+                        }}
+                        title={selectedDestination.title}
+                        description={selectedDestination.address}
+                        pinColor={templatePalette.primaryDark}
+                      />
+                    ) : null}
+                  </mapModule.MapView>
+                ) : (
+                  <View style={styles.mapFallbackCard}>
+                    <MaterialCommunityIcons
+                      name="map-outline"
+                      size={22}
+                      color={templatePalette.primaryDark}
                     />
-                  ) : null}
-                </MapView>
+                    <Text style={styles.mapFallbackText}>
+                      Carte indisponible en Expo Go. Le flux reste testable sans map.
+                    </Text>
+                  </View>
+                )}
               </View>
             ) : null}
 
@@ -1345,6 +1418,29 @@ export default function App() {
                 style={styles.searchInput}
               />
             </View>
+
+            <LinearGradient
+              colors={["#111827", "#1F2937"]}
+              style={styles.uberHeroCard}
+            >
+              <Text style={styles.uberHeroTitle}>Where to?</Text>
+              <Text style={styles.uberHeroSubtitle}>
+                Selection rapide, ETA instantane, suivi live chauffeur.
+              </Text>
+              <View style={styles.rowActions}>
+                <Pressable style={styles.uberHeroAction} onPress={() => setActiveTab("cart")}>
+                  <MaterialCommunityIcons name="car-clock" size={15} color="#FFFFFF" />
+                  <Text style={styles.uberHeroActionText}>Choisir un trajet</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.uberHeroAction}
+                  onPress={() => setInfoMessage("Paiement: Card / ApplePay / GooglePay / Cash")}
+                >
+                  <MaterialCommunityIcons name="credit-card-outline" size={15} color="#FFFFFF" />
+                  <Text style={styles.uberHeroActionText}>Paiement</Text>
+                </Pressable>
+              </View>
+            </LinearGradient>
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               {rideHome.quickSuggestions.map((suggestion) => (
@@ -1361,7 +1457,7 @@ export default function App() {
             <View style={styles.rowActions}>
               {homeShortcut ? (
                 <Pressable
-                  style={styles.smallAction}
+                  style={styles.uberShortcut}
                   onPress={() =>
                     void loadRideOptions({
                       title: "Home",
@@ -1371,12 +1467,13 @@ export default function App() {
                     })
                   }
                 >
+                  <MaterialCommunityIcons name="home-outline" size={15} color="#111827" />
                   <Text style={styles.smallActionText}>Home</Text>
                 </Pressable>
               ) : null}
               {workShortcut ? (
                 <Pressable
-                  style={styles.smallAction}
+                  style={styles.uberShortcut}
                   onPress={() =>
                     void loadRideOptions({
                       title: "Work",
@@ -1386,12 +1483,13 @@ export default function App() {
                     })
                   }
                 >
+                  <MaterialCommunityIcons name="briefcase-outline" size={15} color="#111827" />
                   <Text style={styles.smallActionText}>Work</Text>
                 </Pressable>
               ) : null}
               {savedShortcut ? (
                 <Pressable
-                  style={styles.smallAction}
+                  style={styles.uberShortcut}
                   onPress={() =>
                     void loadRideOptions({
                       title: "Saved",
@@ -1401,6 +1499,7 @@ export default function App() {
                     })
                   }
                 >
+                  <MaterialCommunityIcons name="bookmark-outline" size={15} color="#111827" />
                   <Text style={styles.smallActionText}>Saved</Text>
                 </Pressable>
               ) : null}
@@ -1434,11 +1533,21 @@ export default function App() {
               <TextInput
                 value={searchValue}
                 onChangeText={setSearchValue}
-                placeholder="Rechercher restos, produits, categories..."
+                placeholder="Recherche restaurants, plats, courses..."
                 placeholderTextColor="#94A3B8"
                 style={styles.searchInput}
               />
             </View>
+
+            <LinearGradient
+              colors={["#FFF7D6", "#FFFFFF"]}
+              style={styles.glovoHeroBanner}
+            >
+              <Text style={styles.glovoHeroTitle}>Delivery ultra rapide</Text>
+              <Text style={styles.glovoHeroText}>
+                Choisis une categorie, filtre tes restos et commande en quelques secondes.
+              </Text>
+            </LinearGradient>
 
             <ScrollView
               horizontal
@@ -1474,6 +1583,49 @@ export default function App() {
               })}
             </ScrollView>
 
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.templateCategoriesContainer}
+            >
+              <Pressable
+                style={[
+                  styles.templateCategoryChip,
+                  glovoQuickFilter === "ALL" ? styles.templateCategoryChipActive : null,
+                ]}
+                onPress={() => setGlovoQuickFilter("ALL")}
+              >
+                <Text style={styles.templateCategoryText}>Tous</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.templateCategoryChip,
+                  glovoQuickFilter === "FAST" ? styles.templateCategoryChipActive : null,
+                ]}
+                onPress={() => setGlovoQuickFilter("FAST")}
+              >
+                <Text style={styles.templateCategoryText}>Livraison &lt; 25 min</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.templateCategoryChip,
+                  glovoQuickFilter === "TOP" ? styles.templateCategoryChipActive : null,
+                ]}
+                onPress={() => setGlovoQuickFilter("TOP")}
+              >
+                <Text style={styles.templateCategoryText}>Top notes 4.6+</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.templateCategoryChip,
+                  glovoQuickFilter === "LOW_FEE" ? styles.templateCategoryChipActive : null,
+                ]}
+                onPress={() => setGlovoQuickFilter("LOW_FEE")}
+              >
+                <Text style={styles.templateCategoryText}>Frais bas</Text>
+              </Pressable>
+            </ScrollView>
+
             {gojekPromoEvents.map((event) => (
               <View key={event.title} style={styles.infoCard}>
                 <Text style={styles.infoCardTitle}>{event.title}</Text>
@@ -1481,7 +1633,9 @@ export default function App() {
               </View>
             ))}
 
-            <Text style={styles.templateSectionLabel}>Restaurants & commerces</Text>
+            <Text style={styles.templateSectionLabel}>
+              Restaurants & commerces ({filteredStores.length})
+            </Text>
             {filteredStores.map((store) => (
               <Pressable
                 key={store.id}
@@ -1849,34 +2003,62 @@ export default function App() {
 
             <View style={styles.mapCard}>
               <Text style={styles.mapCardTitle}>Position live</Text>
-              <MapView style={styles.trackingMapView} initialRegion={rideTrackingRegion}>
-                <Marker
-                  coordinate={{
-                    latitude: activeRideTracking.pickup.lat,
-                    longitude: activeRideTracking.pickup.lng,
-                  }}
-                  title="Pickup"
-                  pinColor="#111827"
-                />
-                <Marker
-                  coordinate={{
-                    latitude: activeRideTracking.destination.lat,
-                    longitude: activeRideTracking.destination.lng,
-                  }}
-                  title={activeRideTracking.destination.text}
-                  pinColor={templatePalette.primaryDark}
-                />
-                <Marker
-                  coordinate={{
-                    latitude: activeRideTracking.position.lat,
-                    longitude: activeRideTracking.position.lng,
-                  }}
-                  title={activeRideTracking.driver?.name ?? "Chauffeur"}
-                  description={activeRideTracking.driver?.vehicle ?? "En route"}
-                  pinColor="#22C55E"
-                />
-                <Polyline coordinates={rideRoutePoints} strokeColor="#111827" strokeWidth={3} />
-              </MapView>
+              {hasNativeMap && mapModule.MapView ? (
+                <mapModule.MapView
+                  style={styles.trackingMapView}
+                  initialRegion={rideTrackingRegion}
+                >
+                  {mapModule.Marker ? (
+                    <mapModule.Marker
+                      coordinate={{
+                        latitude: activeRideTracking.pickup.lat,
+                        longitude: activeRideTracking.pickup.lng,
+                      }}
+                      title="Pickup"
+                      pinColor="#111827"
+                    />
+                  ) : null}
+                  {mapModule.Marker ? (
+                    <mapModule.Marker
+                      coordinate={{
+                        latitude: activeRideTracking.destination.lat,
+                        longitude: activeRideTracking.destination.lng,
+                      }}
+                      title={activeRideTracking.destination.text}
+                      pinColor={templatePalette.primaryDark}
+                    />
+                  ) : null}
+                  {mapModule.Marker ? (
+                    <mapModule.Marker
+                      coordinate={{
+                        latitude: activeRideTracking.position.lat,
+                        longitude: activeRideTracking.position.lng,
+                      }}
+                      title={activeRideTracking.driver?.name ?? "Chauffeur"}
+                      description={activeRideTracking.driver?.vehicle ?? "En route"}
+                      pinColor="#22C55E"
+                    />
+                  ) : null}
+                  {mapModule.Polyline ? (
+                    <mapModule.Polyline
+                      coordinates={rideRoutePoints}
+                      strokeColor="#111827"
+                      strokeWidth={3}
+                    />
+                  ) : null}
+                </mapModule.MapView>
+              ) : (
+                <View style={styles.mapFallbackCard}>
+                  <MaterialCommunityIcons
+                    name="map-outline"
+                    size={22}
+                    color={templatePalette.primaryDark}
+                  />
+                  <Text style={styles.mapFallbackText}>
+                    Tracking map indisponible dans Expo Go.
+                  </Text>
+                </View>
+              )}
               <Text style={styles.mapCoordinate}>Depart: {activeRideTracking.pickup.text}</Text>
               <Text style={styles.mapCoordinate}>
                 Arrivee: {activeRideTracking.destination.text}
@@ -1937,34 +2119,62 @@ export default function App() {
 
             <View style={styles.mapCard}>
               <Text style={styles.mapCardTitle}>Position livreur</Text>
-              <MapView style={styles.trackingMapView} initialRegion={orderTrackingRegion}>
-                <Marker
-                  coordinate={{
-                    latitude: tracking.pickup.lat,
-                    longitude: tracking.pickup.lng,
-                  }}
-                  title={tracking.pickup.name}
-                  pinColor="#111827"
-                />
-                <Marker
-                  coordinate={{
-                    latitude: tracking.destination.lat,
-                    longitude: tracking.destination.lng,
-                  }}
-                  title={tracking.destination.text}
-                  pinColor={templatePalette.primaryDark}
-                />
-                <Marker
-                  coordinate={{
-                    latitude: tracking.position.lat,
-                    longitude: tracking.position.lng,
-                  }}
-                  title={tracking.courier?.name ?? "Livreur"}
-                  description={tracking.courier?.vehicle ?? "En route"}
-                  pinColor="#22C55E"
-                />
-                <Polyline coordinates={orderRoutePoints} strokeColor="#111827" strokeWidth={3} />
-              </MapView>
+              {hasNativeMap && mapModule.MapView ? (
+                <mapModule.MapView
+                  style={styles.trackingMapView}
+                  initialRegion={orderTrackingRegion}
+                >
+                  {mapModule.Marker ? (
+                    <mapModule.Marker
+                      coordinate={{
+                        latitude: tracking.pickup.lat,
+                        longitude: tracking.pickup.lng,
+                      }}
+                      title={tracking.pickup.name}
+                      pinColor="#111827"
+                    />
+                  ) : null}
+                  {mapModule.Marker ? (
+                    <mapModule.Marker
+                      coordinate={{
+                        latitude: tracking.destination.lat,
+                        longitude: tracking.destination.lng,
+                      }}
+                      title={tracking.destination.text}
+                      pinColor={templatePalette.primaryDark}
+                    />
+                  ) : null}
+                  {mapModule.Marker ? (
+                    <mapModule.Marker
+                      coordinate={{
+                        latitude: tracking.position.lat,
+                        longitude: tracking.position.lng,
+                      }}
+                      title={tracking.courier?.name ?? "Livreur"}
+                      description={tracking.courier?.vehicle ?? "En route"}
+                      pinColor="#22C55E"
+                    />
+                  ) : null}
+                  {mapModule.Polyline ? (
+                    <mapModule.Polyline
+                      coordinates={orderRoutePoints}
+                      strokeColor="#111827"
+                      strokeWidth={3}
+                    />
+                  ) : null}
+                </mapModule.MapView>
+              ) : (
+                <View style={styles.mapFallbackCard}>
+                  <MaterialCommunityIcons
+                    name="map-outline"
+                    size={22}
+                    color={templatePalette.primaryDark}
+                  />
+                  <Text style={styles.mapFallbackText}>
+                    Tracking map indisponible dans Expo Go.
+                  </Text>
+                </View>
+              )}
               <Text style={styles.mapCoordinate}>Depart: {tracking.pickup.name}</Text>
               <Text style={styles.mapCoordinate}>Arrivee: {tracking.destination.text}</Text>
             </View>
@@ -3640,6 +3850,24 @@ const styles = StyleSheet.create({
     height: 210,
     borderRadius: 12,
   },
+  mapFallbackCard: {
+    width: "100%",
+    minHeight: 150,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#F8FAFC",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 14,
+    gap: 8,
+  },
+  mapFallbackText: {
+    color: "#64748B",
+    textAlign: "center",
+    lineHeight: 18,
+    fontSize: 12,
+  },
   mapCardTitle: {
     color: "#111827",
     fontWeight: "600",
@@ -3800,6 +4028,56 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
   },
+  glovoHeroBanner: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    padding: 14,
+    marginBottom: 10,
+  },
+  glovoHeroTitle: {
+    color: "#111827",
+    fontSize: 16,
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  glovoHeroText: {
+    color: "#475569",
+    lineHeight: 19,
+    fontSize: 13,
+  },
+  uberHeroCard: {
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 10,
+  },
+  uberHeroTitle: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  uberHeroSubtitle: {
+    color: "#D1D5DB",
+    marginTop: 6,
+    lineHeight: 18,
+    fontSize: 13,
+  },
+  uberHeroAction: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  uberHeroActionText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 12,
+  },
   infoCardTitle: {
     color: "#111827",
     fontWeight: "700",
@@ -3833,6 +4111,17 @@ const styles = StyleSheet.create({
     borderColor: templatePalette.primaryDark,
     paddingVertical: 8,
     paddingHorizontal: 12,
+  },
+  uberShortcut: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
   smallActionSelected: {
     backgroundColor: "#FEF3C7",
