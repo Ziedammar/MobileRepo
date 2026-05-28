@@ -1,0 +1,514 @@
+export type UserRole = "SUPER_ADMIN" | "ADMIN" | "CLIENT" | "LIVREUR";
+
+export type UserAccessStatus =
+  | "ACTIVE"
+  | "PENDING_APPROVAL"
+  | "REJECTED"
+  | "SUSPENDED";
+
+export type AuthUser = {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  role: UserRole;
+  accessStatus: UserAccessStatus;
+  requestedStoreName: string | null;
+  requestedVehicle: string | null;
+};
+
+export type AuthResponse = {
+  token: string | null;
+  refreshToken?: string | null;
+  requiresApproval: boolean;
+  message: string;
+  user: AuthUser;
+};
+
+export type RideStatus =
+  | "PENDING"
+  | "ACCEPTED"
+  | "ONGOING"
+  | "COMPLETED"
+  | "CANCELLED";
+
+export type RideServiceType = "UBER_X" | "COMFORT" | "BLACK" | "XL";
+export type PaymentMethodType = "CARD" | "APPLE_PAY" | "GOOGLE_PAY" | "CASH";
+export type SavedPlaceKind = "HOME" | "WORK" | "SAVED";
+
+export type Product = {
+  id: string;
+  storeId?: string;
+  name: string;
+  description: string;
+  category?: string;
+  price: number;
+  stock?: number;
+  isAvailable?: boolean;
+  imageUrl: string;
+  isPopular?: boolean;
+};
+
+export type StoreSummary = {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  lat?: number;
+  lng?: number;
+  rating: number;
+  etaMinutes: number;
+  deliveryFee: number;
+  imageUrl: string;
+  adminName?: string | null;
+  highlightProducts?: Array<{
+    id: string;
+    name: string;
+    price: number;
+    imageUrl: string;
+  }>;
+  productsPreview?: Array<{
+    id: string;
+    name: string;
+    price: number;
+    imageUrl: string;
+  }>;
+};
+
+export type HomeResponse = {
+  hero: {
+    title: string;
+    subtitle: string;
+  };
+  categories: string[];
+  stores: StoreSummary[];
+};
+
+export type StoreDetails = {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  lat: number;
+  lng: number;
+  rating: number;
+  etaMinutes: number;
+  deliveryFee: number;
+  imageUrl: string;
+  products: Product[];
+};
+
+export type GuestAuthResponse = AuthResponse;
+
+export type CreateOrderPayload = {
+  storeId: string;
+  addressText: string;
+  addressLat: number;
+  addressLng: number;
+  items: Array<{
+    productId: string;
+    quantity: number;
+  }>;
+};
+
+export type CreateOrderResponse = {
+  id: string;
+  status: string;
+  statusLabel: string;
+  paymentStatus: string;
+  paymentRequired: boolean;
+  etaMinutes: number;
+  store: {
+    id: string;
+    name: string;
+  };
+  courier: {
+    id: string;
+    name: string;
+    vehicle: string;
+    rating: number;
+  } | null;
+  totals: {
+    subtotal: number;
+    deliveryFee: number;
+    total: number;
+  };
+};
+
+export type PaymentResponse = {
+  orderId: string;
+  paymentStatus: string;
+  paymentIntentId: string | null;
+  provider: "CARD" | "APPLE_PAY" | "GOOGLE_PAY";
+  cardLast4: string | null;
+  status: string;
+};
+
+export type OrderDetails = {
+  id: string;
+  status: string;
+  statusLabel: string;
+  paymentStatus: string;
+  paymentIntentId: string | null;
+  paidAt: string | null;
+  acceptedAt: string | null;
+  refusedAt: string | null;
+  adminNote: string | null;
+  createdAt: string;
+  etaMinutes: number;
+  user: {
+    id: string;
+    name: string;
+    email: string | null;
+  };
+  store: {
+    id: string;
+    name: string;
+    imageUrl: string;
+  };
+  courier: {
+    id: string;
+    name: string;
+    vehicle: string;
+    rating: number;
+  } | null;
+  address: {
+    text: string;
+    lat: number;
+    lng: number;
+  };
+  items: Array<{
+    id: string;
+    productId: string;
+    name: string;
+    unitPrice: number;
+    quantity: number;
+    lineTotal: number;
+    imageUrl: string;
+  }>;
+  totals: {
+    subtotal: number;
+    deliveryFee: number;
+    total: number;
+  };
+  timeline: Array<{
+    id: string;
+    status: string;
+    label: string;
+    timestamp: string;
+  }>;
+};
+
+export type TrackingResponse = {
+  orderId: string;
+  status: string;
+  statusLabel: string;
+  paymentStatus: string;
+  etaMinutes: number;
+  courier: {
+    id: string;
+    name: string;
+    vehicle: string;
+    rating: number;
+  } | null;
+  pickup: {
+    lat: number;
+    lng: number;
+    name: string;
+  };
+  destination: {
+    lat: number;
+    lng: number;
+    text: string;
+  };
+  position: {
+    lat: number;
+    lng: number;
+  };
+};
+
+export type SavedPlace = {
+  id: string;
+  userId: string;
+  label: string;
+  kind: SavedPlaceKind;
+  address: string;
+  lat: number;
+  lng: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RideHomeResponse = {
+  whereToLabel: string;
+  userLocation: {
+    lat: number;
+    lng: number;
+    address: string;
+  };
+  quickSuggestions: string[];
+  recent: Array<{
+    id: string;
+    destination: string;
+    status: RideStatus;
+    serviceType: RideServiceType;
+    amount: number;
+    createdAt: string;
+  }>;
+  shortcuts: {
+    home: SavedPlace | null;
+    work: SavedPlace | null;
+    saved: SavedPlace[];
+  };
+};
+
+export type RideSearchResponse = {
+  query: string;
+  results: Array<{
+    title: string;
+    address: string;
+    lat: number;
+    lng: number;
+  }>;
+  favorites: SavedPlace[];
+  recent: Array<{
+    destinationAddress: string;
+    destinationLat: number;
+    destinationLng: number;
+  }>;
+};
+
+export type RideOption = {
+  serviceType: RideServiceType;
+  label: string;
+  etaMinutes: number;
+  seats: number;
+  estimatedPrice: number;
+};
+
+export type RideOptionsResponse = {
+  distanceKm: number;
+  options: RideOption[];
+  paymentMethods: PaymentMethodType[];
+};
+
+export type Ride = {
+  id: string;
+  passengerUserId: string;
+  driverUserId: string | null;
+  status: RideStatus;
+  serviceType: RideServiceType;
+  paymentMethodType: PaymentMethodType;
+  pickupAddress: string;
+  pickupLat: number;
+  pickupLng: number;
+  destinationAddress: string;
+  destinationLat: number;
+  destinationLng: number;
+  seats: number;
+  etaMinutes: number;
+  distanceKm: number;
+  estimatedPrice: number;
+  finalPrice: number | null;
+  currency: string;
+  promoCode: string | null;
+  driverName: string | null;
+  driverPhotoUrl: string | null;
+  vehicleLabel: string | null;
+  vehiclePlate: string | null;
+  acceptedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  cancelledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type RideTrackingResponse = {
+  rideId: string;
+  status: RideStatus;
+  etaMinutes: number;
+  pickup: {
+    lat: number;
+    lng: number;
+    text: string;
+  };
+  destination: {
+    lat: number;
+    lng: number;
+    text: string;
+  };
+  position: {
+    lat: number;
+    lng: number;
+  };
+  driver: {
+    name: string;
+    vehicle: string;
+  } | null;
+};
+
+export type UserPaymentMethod = {
+  id: string;
+  userId: string;
+  type: PaymentMethodType;
+  label: string;
+  providerToken: string | null;
+  last4: string | null;
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PaymentTransaction = {
+  id: string;
+  userId: string | null;
+  rideId: string | null;
+  amount: number;
+  currency: string;
+  provider: string;
+  status: "PENDING" | "PAID" | "FAILED" | "REFUNDED";
+  providerRef: string | null;
+  invoiceUrl: string | null;
+  paidAt: string | null;
+  createdAt: string;
+};
+
+export type NotificationsResponse = {
+  unread: number;
+  items: Array<{
+    id: string;
+    userId: string;
+    type: "DRIVER_ARRIVED" | "PROMOTION" | "RIDE_STATUS" | "SYSTEM";
+    title: string;
+    body: string;
+    payloadJson: string | null;
+    readAt: string | null;
+    createdAt: string;
+  }>;
+};
+
+export type SupportTicket = {
+  id: string;
+  userId: string;
+  subject: string;
+  status: "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED";
+  createdAt: string;
+  updatedAt: string;
+  messages: Array<{
+    id: string;
+    ticketId: string;
+    senderRole: string;
+    message: string;
+    createdAt: string;
+  }>;
+};
+
+export type AdminDashboardResponse = {
+  store: {
+    id: string;
+    name: string;
+    category: string;
+  };
+  stats: {
+    totalOrders: number;
+    pendingOrders: number;
+    acceptedOrders: number;
+    preparingOrders: number;
+    onWayOrders: number;
+    deliveredToday: number;
+    refusedToday: number;
+    revenueToday: number;
+    productsCount: number;
+    availableCouriers: number;
+    busyCouriers: number;
+    chart: Array<{
+      label: string;
+      orders: number;
+    }>;
+  };
+};
+
+export type AdminOrder = {
+  id: string;
+  status: string;
+  paymentStatus: string;
+  total: number;
+  createdAt: string;
+  user: {
+    id: string;
+    name: string;
+    email: string | null;
+  };
+  courier: {
+    id: string;
+    name: string;
+    vehicle: string;
+    isAvailable: boolean;
+  } | null;
+};
+
+export type Courier = {
+  id: string;
+  userId?: string | null;
+  storeId?: string | null;
+  name: string;
+  rating: number;
+  vehicle: string;
+  lat: number;
+  lng: number;
+  isAvailable: boolean;
+};
+
+export type SuperAdminDashboard = {
+  usersCount: number;
+  storesCount: number;
+  pendingApprovals: number;
+  ordersToday: number;
+  deliveredToday: number;
+  usersByRole: Array<{
+    role: UserRole;
+    count: number;
+  }>;
+};
+
+export type MeResponse = {
+  user: AuthUser;
+  managedStore?: {
+    id: string;
+    name: string;
+    category: string;
+  } | null;
+  courierProfile?: {
+    id: string;
+    name: string;
+    vehicle: string;
+    isAvailable?: boolean;
+  } | null;
+};
+
+export type LivreurOrdersResponse = {
+  courier: {
+    id: string;
+    name: string;
+    vehicle: string;
+    isAvailable: boolean;
+    store: {
+      id: string;
+      name: string;
+    } | null;
+  };
+  orders: Array<{
+    id: string;
+    status: string;
+    paymentStatus: string;
+    total: number;
+    createdAt: string;
+    updatedAt: string;
+    addressText: string;
+    store: {
+      id: string;
+      name: string;
+    };
+  }>;
+};

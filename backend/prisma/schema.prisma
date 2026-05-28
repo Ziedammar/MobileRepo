@@ -1,0 +1,387 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum OrderStatus {
+  PENDING
+  ACCEPTED
+  REFUSED
+  PREPARING
+  PICKED_UP
+  ON_THE_WAY
+  DELIVERED
+  CANCELLED
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  CLIENT
+  LIVREUR
+}
+
+enum UserAccessStatus {
+  ACTIVE
+  PENDING_APPROVAL
+  REJECTED
+  SUSPENDED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum RideStatus {
+  PENDING
+  ACCEPTED
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+enum RideServiceType {
+  UBER_X
+  COMFORT
+  BLACK
+  XL
+}
+
+enum PaymentMethodType {
+  CARD
+  APPLE_PAY
+  GOOGLE_PAY
+  CASH
+}
+
+enum NotificationType {
+  DRIVER_ARRIVED
+  PROMOTION
+  RIDE_STATUS
+  SYSTEM
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum PaymentTransactionStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum SavedPlaceKind {
+  HOME
+  WORK
+  SAVED
+}
+
+model User {
+  id                 String           @id @default(cuid())
+  name               String
+  email              String?          @unique
+  passwordHash       String?
+  role               UserRole         @default(CLIENT)
+  accessStatus       UserAccessStatus @default(ACTIVE)
+  requestedStoreName String?
+  requestedVehicle   String?
+  phone              String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  orders             Order[]
+  ridesAsPassenger   Ride[]           @relation("RidePassenger")
+  ridesAsDriver      Ride[]           @relation("RideDriver")
+  savedPlaces        SavedPlace[]
+  notifications      UserNotification[]
+  paymentMethods     PaymentMethod[]
+  paymentTransactions PaymentTransaction[]
+  supportTickets     SupportTicket[]
+  authSessions       AuthSession[]
+  managedStore       Store?           @relation("StoreAdmin")
+  courierProfile     Courier?
+}
+
+model Courier {
+  id          String   @id @default(cuid())
+  userId      String?  @unique
+  storeId     String?
+  name        String
+  rating      Float    @default(4.8)
+  vehicle     String
+  lat         Float
+  lng         Float
+  isAvailable Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  store       Store?   @relation(fields: [storeId], references: [id], onDelete: SetNull)
+  orders      Order[]
+
+  @@index([userId])
+  @@index([storeId])
+}
+
+model Store {
+  id          String   @id @default(cuid())
+  adminUserId String?  @unique
+  name        String
+  category    String
+  description String
+  rating      Float    @default(4.5)
+  etaMinutes  Int
+  deliveryFee Float
+  imageUrl    String
+  lat         Float
+  lng         Float
+  createdAt   DateTime @default(now())
+  adminUser   User?    @relation("StoreAdmin", fields: [adminUserId], references: [id], onDelete: SetNull)
+  products    Product[]
+  orders      Order[]
+  couriers    Courier[]
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  storeId     String
+  name        String
+  description String
+  category    String   @default("General")
+  price       Float
+  stock       Int      @default(0)
+  isAvailable Boolean  @default(true)
+  imageUrl    String
+  isPopular   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  store       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  orderItems  OrderItem[]
+
+  @@index([storeId])
+}
+
+model Order {
+  id              String        @id @default(cuid())
+  userId          String
+  storeId         String
+  courierId       String?
+  status          OrderStatus   @default(PENDING)
+  paymentStatus   PaymentStatus @default(PENDING)
+  paymentIntentId String?
+  paidAt          DateTime?
+  acceptedAt      DateTime?
+  refusedAt       DateTime?
+  adminNote       String?
+  subtotal        Float
+  deliveryFee     Float
+  total           Float
+  addressText     String
+  addressLat      Float
+  addressLng      Float
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  user            User          @relation(fields: [userId], references: [id])
+  store           Store         @relation(fields: [storeId], references: [id])
+  courier         Courier?      @relation(fields: [courierId], references: [id], onDelete: SetNull)
+  items           OrderItem[]
+  events          OrderStatusEvent[]
+
+  @@index([userId])
+  @@index([storeId])
+  @@index([courierId])
+  @@index([status])
+  @@index([paymentStatus])
+}
+
+model OrderItem {
+  id            String  @id @default(cuid())
+  orderId       String
+  productId     String
+  nameSnapshot  String
+  priceSnapshot Float
+  quantity      Int
+  order         Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product       Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+}
+
+model OrderStatusEvent {
+  id        String      @id @default(cuid())
+  orderId   String
+  status    OrderStatus
+  label     String
+  createdAt DateTime    @default(now())
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+model Ride {
+  id                String               @id @default(cuid())
+  passengerUserId   String
+  driverUserId      String?
+  status            RideStatus           @default(PENDING)
+  serviceType       RideServiceType      @default(UBER_X)
+  paymentMethodType PaymentMethodType    @default(CARD)
+  pickupAddress     String
+  pickupLat         Float
+  pickupLng         Float
+  destinationAddress String
+  destinationLat    Float
+  destinationLng    Float
+  seats             Int                  @default(4)
+  etaMinutes        Int                  @default(8)
+  distanceKm        Float                @default(0)
+  estimatedPrice    Float
+  finalPrice        Float?
+  currency          String               @default("TND")
+  promoCode         String?
+  driverName        String?
+  driverPhotoUrl    String?
+  vehicleLabel      String?
+  vehiclePlate      String?
+  acceptedAt        DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  cancelledAt       DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  passengerUser     User                 @relation("RidePassenger", fields: [passengerUserId], references: [id], onDelete: Cascade)
+  driverUser        User?                @relation("RideDriver", fields: [driverUserId], references: [id], onDelete: SetNull)
+  events            RideEvent[]
+  payments          PaymentTransaction[]
+
+  @@index([passengerUserId])
+  @@index([driverUserId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model RideEvent {
+  id        String     @id @default(cuid())
+  rideId    String
+  status    RideStatus
+  label     String
+  lat       Float?
+  lng       Float?
+  createdAt DateTime   @default(now())
+  ride      Ride       @relation(fields: [rideId], references: [id], onDelete: Cascade)
+
+  @@index([rideId])
+}
+
+model SavedPlace {
+  id        String         @id @default(cuid())
+  userId    String
+  label     String
+  kind      SavedPlaceKind @default(SAVED)
+  address   String
+  lat       Float
+  lng       Float
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model UserNotification {
+  id          String           @id @default(cuid())
+  userId      String
+  type        NotificationType @default(SYSTEM)
+  title       String
+  body        String
+  payloadJson String?
+  readAt      DateTime?
+  createdAt   DateTime         @default(now())
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model PaymentMethod {
+  id            String            @id @default(cuid())
+  userId        String
+  type          PaymentMethodType
+  label         String
+  providerToken String?
+  last4         String?
+  isDefault     Boolean           @default(false)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PaymentTransaction {
+  id          String                   @id @default(cuid())
+  userId      String?
+  rideId      String?
+  amount      Float
+  currency    String                   @default("TND")
+  provider    String
+  status      PaymentTransactionStatus @default(PAID)
+  providerRef String?
+  invoiceUrl  String?
+  paidAt      DateTime?
+  createdAt   DateTime                 @default(now())
+  user        User?                    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  ride        Ride?                    @relation(fields: [rideId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([rideId])
+  @@index([createdAt])
+}
+
+model SupportTicket {
+  id        String            @id @default(cuid())
+  userId    String
+  subject   String
+  status    SupportTicketStatus @default(OPEN)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  SupportMessage[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model SupportMessage {
+  id         String   @id @default(cuid())
+  ticketId   String
+  senderRole String
+  message    String
+  createdAt  DateTime @default(now())
+  ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+}
+
+model AuthSession {
+  id               String   @id @default(cuid())
+  userId           String
+  refreshTokenHash String
+  userAgent        String?
+  ipAddress        String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  lastUsedAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}

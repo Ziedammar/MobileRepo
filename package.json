@@ -1,0 +1,30 @@
+{
+  "name": "mobile-repo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Application mobile de livraison type Glovo (frontend + backend)",
+  "scripts": {
+    "dev:backend": "npm run dev --workspace @livraison/backend",
+    "dev:mobile": "npm run start --workspace @livraison/mobile",
+    "build:backend": "npm run build --workspace @livraison/backend",
+    "typecheck": "npm run typecheck --workspace @livraison/backend && npm run typecheck --workspace @livraison/mobile"
+  },
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ziedammar/MobileRepo.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Ziedammar/MobileRepo/issues"
+  },
+  "homepage": "https://github.com/Ziedammar/MobileRepo#readme",
+  "devDependencies": {
+    "@types/react": "^19.2.14"
+  }
+}
